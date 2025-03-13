@@ -43,7 +43,8 @@ test: False
 checkpoint: ''
 op_checkpoint: ''
 player_pool_type: ''
-num_agents: 2
+num_agents: ${resolve_default:2,${...num_agents}}
+
 
 # HRL Arguments
 motion_file: 'tasks/data/motions/reallusion_sword_shield/RL_Avatar_Idle_Ready_Motion.npy'

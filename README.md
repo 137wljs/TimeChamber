@@ -100,7 +100,7 @@ python train.py task=MA_Ant_Sumo train=MA_Ant_SumoPPO headless=True
 
 ```bash
 # run self-play training for Ant Battle task
-python train.py task=MA_Ant_Battle train=MA_Ant_BattlePPO headless=True
+python train.py task=MA_Ant_Battle train=MA_Ant_BattlePPO headless=True num_agents=2
 ```
 
 Key arguments to the training script
@@ -126,6 +126,11 @@ To evaluate your policies, for example:
 ```bash
 # run testing for Ant Sumo policy
 python train.py task=MA_Ant_Sumo train=MA_Ant_SumoPPO test=True num_envs=4 minibatch_size=32 headless=False checkpoint='models/ant_sumo/policy.pth'
+```
+
+```bash
+# run testing for Ant Battle policy
+python train.py task=MA_Ant_Battle train=MA_Ant_BattlePPO test=True num_envs=4 minibatch_size=32 headless=False num_agents=<num_agents> checkpoint='models/ant_battle_<num_agents>agents/policy.pth'
 ```
 
 ```bash

@@ -44,10 +44,10 @@ from copy import deepcopy
 import sys
 
 import abc
-from .vec_task import Env
+from .va_env import VA_Env
 
 
-class MA_VecTask(Env):
+class VA_VecTask(VA_Env):
 
     def __init__(self, config, rl_device, sim_device, graphics_device_id, headless,
                  virtual_screen_capture: bool = False, force_render: bool = False):
@@ -138,10 +138,14 @@ class MA_VecTask(Env):
         """
 
         # allocate buffers
-        self.obs_buf = torch.zeros(
-            (self.num_envs * self.num_agents, self.num_obs), device=self.device, dtype=torch.float)
-        self.states_buf = torch.zeros(
-            (self.num_envs, self.num_states), device=self.device, dtype=torch.float)
+        self.obs_buf1 = torch.zeros(
+            (self.num_envs * self.num_agents1, self.num_obs[0]), device=self.device, dtype=torch.float)
+        self.obs_buf2 = torch.zeros(
+            (self.num_envs * self.num_agents2, self.num_obs[1]), device=self.device, dtype=torch.float)
+        self.states_buf1 = torch.zeros(
+            (self.num_envs, self.num_states1), device=self.device, dtype=torch.float)
+        self.states_buf2 = torch.zeros(
+            (self.num_envs, self.num_states2), device=self.device, dtype=torch.float)
         self.rew_buf = torch.zeros(
             self.num_envs * self.num_agents, device=self.device, dtype=torch.float)
         self.reset_buf = torch.ones(
@@ -191,10 +195,10 @@ class MA_VecTask(Env):
 
     def get_state(self):
         """Returns the state buffer of the environment (the priviledged observations for asymmetric training)."""
-        return torch.clamp(self.states_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        return (torch.clamp(self.states_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device), torch.clamp(self.states_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device))
 
     @abc.abstractmethod
-    def pre_physics_step(self, actions: torch.Tensor):
+    def pre_physics_step(self, actions1: torch.Tensor, actions2: torch.Tensor):
         """Apply the actions to the environment (eg by setting torques, position targets).
 
         Args:
@@ -205,7 +209,7 @@ class MA_VecTask(Env):
     def post_physics_step(self):
         """Compute reward and observations, reset any environments that require it."""
 
-    def step(self, actions: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    def step(self, actions1: torch.Tensor, actions2: torch.Tensor) -> Tuple[Dict[str, torch.Tensor], torch.Tensor, torch.Tensor, Dict[str, Any]]:
         """Step the physics of the environment.
 
         Args:
@@ -216,11 +220,11 @@ class MA_VecTask(Env):
         """
 
         # randomize actions
-        if self.dr_randomizations.get('actions', None):
+        if self.dr_randomizations.get('actions', None):                            # useless?
             actions = self.dr_randomizations['actions']['noise_lambda'](actions)
 
         # apply actions
-        self.pre_physics_step(actions)
+        self.pre_physics_step(actions1, actions2)
 
         # step physics and render each frame
         for i in range(self.control_freq_inv):
@@ -253,8 +257,8 @@ class MA_VecTask(Env):
         Returns:
             A buffer of zero torch actions
         """
-        actions = torch.zeros([self.num_envs * self.num_agents, self.num_actions], dtype=torch.float32,
-                              device=self.rl_device)
+        actions = (torch.zeros([self.num_envs * self.num_agents, self.num_actions1], dtype=torch.float32,
+                              device=self.rl_device), torch.zeros([self.num_envs * self.num_agents, self.num_actions2], dtype=torch.float32, device=self.rl_device))
 
         return actions
 
@@ -267,7 +271,8 @@ class MA_VecTask(Env):
             env_ids = to_torch(np.arange(self.num_envs), device=self.device, dtype=torch.long)
             self.reset_idx(env_ids)
             self.compute_observations()
-            self.pos_before = self.obs_buf[:self.num_envs, :2].clone()
+            self.pos_before1 = self.obs_buf1[:self.num_envs, :2].clone()
+            self.pos_before2 = self.obs_buf2[:self.num_envs, :2].clone()
         else:
             self._reset_envs(env_ids=env_ids)
         return
@@ -276,7 +281,8 @@ class MA_VecTask(Env):
         if (len(env_ids) > 0):
             self.reset_idx(env_ids)
             self.compute_observations()
-            self.pos_before = self.obs_buf[:self.num_envs, :2].clone()
+            self.pos_before1 = self.obs_buf1[:self.num_envs, :2].clone()
+            self.pos_before2 = self.obs_buf2[:self.num_envs, :2].clone()
         return
 
     def reset_done(self):
@@ -288,10 +294,12 @@ class MA_VecTask(Env):
         if len(done_env_ids) > 0:
             self.reset_idx(done_env_ids)
 
-        self.obs_dict["obs"] = torch.clamp(self.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs1"] = torch.clamp(self.obs_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device)
+        self.obs_dict["obs2"] = torch.clamp(self.obs_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device)
         # asymmetric actor-critic
         if self.num_states > 0:
-            self.obs_dict["states"] = self.get_state()
+            self.obs_dict["states1"] = self.get_state()[0]
+            self.obs_dict["states2"] = self.get_state()[1]
 
         return self.obs_dict, done_env_ids
 
@@ -385,6 +393,7 @@ class MA_VecTask(Env):
         Returns:
             The array
         """
+
         if "actor_params" not in dr_params:
             return None
         params = []
@@ -428,6 +437,7 @@ class MA_VecTask(Env):
         Args:
             dr_params: parameters for domain randomization to use.
         """
+
         # If we don't have a randomization frequency, randomize every step
         rand_freq = dr_params.get("frequency", 1)
 

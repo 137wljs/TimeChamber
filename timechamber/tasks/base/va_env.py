@@ -104,10 +104,10 @@ class VA_Env(ABC):
 
         self.control_freq_inv = config["env"].get("controlFrequencyInv", 1)
 
-        # self.obs_space = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
-        # self.state_space = spaces.Box(np.ones(self.num_states) * -np.Inf, np.ones(self.num_states) * np.Inf)
+        self.obs_space = (spaces.Box(np.ones(self.num_observations1) * -np.Inf, np.ones(self.num_observations1) * np.Inf), spaces.Box(np.ones(self.num_observations2) * -np.Inf, np.ones(self.num_observations2) * np.Inf))
+        self.state_space = (spaces.Box(np.ones(self.num_states1) * -np.Inf, np.ones(self.num_states1) * np.Inf), spaces.Box(np.ones(self.num_states2) * -np.Inf, np.ones(self.num_states2) * np.Inf))
 
-        self.act_space = spaces.Box(np.ones(self.num_actions) * -1., np.ones(self.num_actions) * 1.)
+        self.act_space = (spaces.Box(np.ones(self.num_actions1) * -1., np.ones(self.num_actions1) * 1.), spaces.Box(np.ones(self.num_actions2) * -1., np.ones(self.num_actions2) * 1.))
 
         self.clip_obs = config["env"].get("clipObservations", np.Inf)
         self.clip_actions = config["env"].get("clipActions", np.Inf)

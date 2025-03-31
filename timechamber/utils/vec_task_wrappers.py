@@ -29,7 +29,7 @@
 from gym import spaces
 import numpy as np
 import torch
-from timechamber.utils.vec_task import VecTaskCPU, VecTaskGPU, VecTaskPython
+from timechamber.utils.vec_task import VecTaskCPU, VecTaskGPU, VecTaskPython, VaVecTaskPython
 
 class VecTaskCPUWrapper(VecTaskCPU):
     def __init__(self, task, rl_device, sync_frame_time=False, clip_observations=5.0, clip_actions=1.0):
@@ -54,6 +54,29 @@ class VecTaskPythonWrapper(VecTaskPython):
     def reset(self, env_ids=None):
         self.task.reset(env_ids)
         return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+
+    @property
+    def amp_observation_space(self):
+        return self._amp_obs_space
+
+    def fetch_amp_obs_demo(self, num_samples):
+        return self.task.fetch_amp_obs_demo(num_samples)
+
+class VaVecTaskPythonWrapper(VaVecTaskPython):
+    def __init__(self, task, rl_device, clip_observations=5.0, clip_actions=1.0, AMP=False):
+        super().__init__(task, rl_device, clip_observations, clip_actions)
+        self.num_agents = task.num_agents1 + task.num_agents2
+        self.num_agents1 = task.num_agents1
+        self.num_agents2 = task.num_agents2
+        if AMP:
+            self._amp_obs_space = spaces.Box(np.ones(task.get_num_amp_obs()) * -np.Inf, np.ones(task.get_num_amp_obs()) * np.Inf)
+        else:
+            self._amp_obs_space = None
+        return
+
+    def reset(self, env_ids=None):
+        self.task.reset(env_ids)
+        return torch.clamp(self.task.obs_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device), torch.clamp(self.task.obs_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device)
 
     @property
     def amp_observation_space(self):

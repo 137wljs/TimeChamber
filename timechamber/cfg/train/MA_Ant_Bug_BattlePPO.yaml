@@ -2,7 +2,7 @@ params:
   seed: ${...seed}
 
   algo:
-    name: self_play_continuous
+    name: va_a2c
 
   model:
     name: continuous_a2c_logstd
@@ -32,7 +32,8 @@ params:
   load_checkpoint: ${if:${...checkpoint},True,False} # flag which sets whether to load the checkpoint
   load_path: ${...checkpoint} # path to the checkpoint to load
   op_load_path: ${if:${...op_checkpoint},${...op_checkpoint},${...checkpoint}} # default play with myself
-  num_agents: ${...num_agents}
+  num_agents1: ${...num_agents1}
+  num_agents2: ${...num_agents2}
   update_win_rate: 0.7
   player_pool_length: 4
   games_to_check: 400
@@ -41,7 +42,7 @@ params:
   device: ${...rl_device}
   config:
     name: ${resolve_default:MA_Ant_Bug_nVm,${....experiment}}
-    env_name: rlgpu
+    env_name: va_rlgpu
     multi_gpu: ${....multi_gpu}
     ppo: True
     mixed_precision: False

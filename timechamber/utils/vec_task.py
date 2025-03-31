@@ -62,6 +62,62 @@ class VecTask():
     @property
     def num_obs(self):
         return self.num_observations
+    
+class VaVecTask():
+    def __init__(self, task, rl_device, clip_observations=5.0, clip_actions=1.0):
+        self.task = task
+
+        self.num_environments = task.num_envs
+        self.num_agents1 = task.num_agents1
+        self.num_agents2 = task.num_agents2
+        self.num_observations1 = task.num_observations1
+        self.num_observations2 = task.num_observations2
+        self.num_states1 = task.num_states1
+        self.num_states2 = task.num_states2
+        self.num_actions1 = task.num_actions1
+        self.num_actions2 = task.num_actions2
+
+        self.obs_space1 = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        self.obs_space2 = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        self.state_space1 = spaces.Box(np.ones(self.num_states1) * -np.Inf, np.ones(self.num_states1) * np.Inf)
+        self.state_space2 = spaces.Box(np.ones(self.num_states2) * -np.Inf, np.ones(self.num_states2) * np.Inf)
+        self.act_space1 = spaces.Box(np.ones(self.num_actions1) * -1., np.ones(self.num_actions1) * 1.)
+        self.act_space2 = spaces.Box(np.ones(self.num_actions2) * -1., np.ones(self.num_actions2) * 1.)
+
+        self.clip_obs = clip_observations
+        self.clip_actions = clip_actions
+        self.rl_device = rl_device
+
+        print("RL device: ", rl_device)
+
+    def step(self, actions):
+        raise NotImplementedError
+
+    def reset(self):
+        raise NotImplementedError
+
+    def get_number_of_agents(self):
+        return self.num_agents
+
+    @property
+    def observation_space(self):
+        return (self.obs_space1, self.obs_space2)
+
+    @property
+    def action_space(self):
+        return (self.act_space1, self.act_space2)
+
+    @property
+    def num_envs(self):
+        return self.num_environments
+
+    @property
+    def num_acts(self):
+        return (self.num_actions1, self.num_actions2)
+
+    @property
+    def num_obs(self):
+        return (self.num_observations1, self.num_observations2)
 
 
 # C++ CPU Class
@@ -137,3 +193,25 @@ class VecTaskPython(VecTask):
         self.task.step(actions)
 
         return torch.clamp(self.task.obs_buf, -self.clip_obs, self.clip_obs).to(self.rl_device)
+    
+class VaVecTaskPython(VaVecTask):
+
+    def get_state(self):
+        return (torch.clamp(self.task.states_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device), torch.clamp(self.task.states_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device))
+
+    def step(self, actions1, actions2):
+        actions1_tensor = torch.clamp(actions1, -self.clip_actions, self.clip_actions)
+        actions2_tensor = torch.clamp(actions2, -self.clip_actions, self.clip_actions)
+
+        self.task.step(actions1_tensor, actions2_tensor)
+
+        return torch.clamp(self.task.obs_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device), torch.clamp(self.task.obs_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device), self.task.rew_buf.to(self.rl_device), self.task.reset_buf.to(self.rl_device), self.task.extras
+
+    def reset(self):
+        actions1 = 0.01 * (1 - 2 * torch.rand([self.task.num_envs, self.task.num_actions1], dtype=torch.float32, device=self.rl_device))
+        actions2 = 0.01 * (1 - 2 * torch.rand([self.task.num_envs, self.task.num_actions2], dtype=torch.float32, device=self.rl_device))
+
+        # step the simulator
+        self.task.step(actions1, actions2)
+
+        return torch.clamp(self.task.obs_buf1, -self.clip_obs, self.clip_obs).to(self.rl_device), torch.clamp(self.task.obs_buf2, -self.clip_obs, self.clip_obs).to(self.rl_device)

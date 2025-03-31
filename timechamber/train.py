@@ -40,9 +40,9 @@ import gym
 
 from timechamber.utils.reformat import omegaconf_to_dict, print_dict
 from timechamber.utils.utils import set_np_formatting, set_seed
-from timechamber.utils.rlgames_utils import RLGPUEnv, RLGPUAlgoObserver, get_rlgames_env_creator
+from timechamber.utils.rlgames_utils import RLGPUEnv, RLEnv, RLGPUAlgoObserver, get_rlgames_env_creator
 from rl_games.common import env_configurations, vecenv
-from rl_games.torch_runner import Runner
+from timechamber.torch_runner import Runner
 from rl_games.algos_torch import model_builder
 from timechamber.ase import ase_agent
 from timechamber.ase import ase_models
@@ -55,6 +55,7 @@ from timechamber.learning import ppo_sp_player
 from timechamber.learning import hrl_sp_player
 from timechamber.learning import vectorized_models
 from timechamber.learning import vectorized_network_builder
+from timechamber.learning.lib.agent.a2c_continuous import A2CAgent
 import timechamber
 
 
@@ -130,15 +131,22 @@ def launch_rlg_hydra(cfg: DictConfig):
     # register the rl-games adapter to use inside the runner
     vecenv.register('RLGPU',
                     lambda config_name, num_actors, **kwargs: RLGPUEnv(config_name, num_actors, **kwargs))
+    vecenv.register('VA_RLGPU',
+                    lambda config_name, num_actors, **kwargs: RLEnv(config_name, num_actors, **kwargs))
 
     env_configurations.register('rlgpu', {
         'vecenv_type': 'RLGPU',
+        'env_creator': create_env_thunk,
+    })
+    env_configurations.register('va_rlgpu', {
+        'vecenv_type': 'VA_RLGPU',
         'env_creator': create_env_thunk,
     })
 
     # register new AMP network builder and agent
     def build_runner(algo_observer):
         runner = Runner(algo_observer)
+        runner.algo_factory.register_builder('va_a2c', lambda **kwargs: A2CAgent(**kwargs))
         runner.algo_factory.register_builder('self_play_continuous', lambda **kwargs: ppo_sp_agent.SPAgent(**kwargs))
         runner.algo_factory.register_builder('self_play_hrl', lambda **kwargs: hrl_sp_agent.HRLSPAgent(**kwargs))
         runner.algo_factory.register_builder('ase', lambda **kwargs: ase_agent.ASEAgent(**kwargs))
@@ -194,7 +202,7 @@ def launch_rlg_hydra(cfg: DictConfig):
             resume="allow",
             monitor_gym=True,
         )
-
+    print("checkpoint", cfg.checkpoint)
     runner.run({
         'train': not cfg.test,
         'play': cfg.test,

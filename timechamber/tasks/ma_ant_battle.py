@@ -346,6 +346,7 @@ class MA_Ant_Battle(MA_VecTask):
         for agent_idx in range(self.num_agents):
             self.actions = torch.cat((self.actions, actions[agent_idx * self.num_envs:(agent_idx + 1) * self.num_envs]),
                                      dim=-1)
+            
         tmp_actions = self.extras['ranks'].unsqueeze(-1).repeat_interleave(self.num_actions, dim=-1).view(self.num_envs,
                                                                                                           self.num_actions * self.num_agents)
         zero_actions = torch.zeros_like(tmp_actions, dtype=torch.float)
@@ -354,6 +355,7 @@ class MA_Ant_Battle(MA_VecTask):
         # reshape [num_envs * num_agents, num_actions] to [num_envs, num_agents * num_actions] print(f'action_size{
 
         targets = self.actions
+        # print("targets.shape", targets.shape)
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 

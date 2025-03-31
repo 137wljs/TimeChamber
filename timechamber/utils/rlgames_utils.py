@@ -37,7 +37,7 @@ from isaacgym import gymapi
 from isaacgym import gymutil
 from omegaconf import DictConfig
 from timechamber.tasks import isaacgym_task_map
-from timechamber.utils.vec_task_wrappers import VecTaskPythonWrapper
+from timechamber.utils.vec_task_wrappers import VecTaskPythonWrapper, VaVecTaskPythonWrapper
 from timechamber.utils.config import parse_sim_params
 
 SIM_TIMESTEP = 1.0 / 60.0
@@ -100,6 +100,17 @@ def get_rlgames_env_creator(
                                        task_config.get("clip_observations", np.inf),
                                        task_config.get("clip_actions", 1.0),
                                        AMP=True)
+        elif task_name == "MA_Ant_Bug_Battle":
+            task = isaacgym_task_map[task_name](
+                cfg=task_config,
+                rl_device=rl_device,
+                sim_device=sim_device,
+                graphics_device_id=graphics_device_id,
+                headless=headless,
+                virtual_screen_capture=virtual_screen_capture,
+                force_render=force_render,
+            )
+            env = VaVecTaskPythonWrapper(task, rl_device, task_config.get("clip_observations", np.inf), task_config.get("clip_actions", 1.0))
         else:
             task = isaacgym_task_map[task_name](
                 cfg=task_config,
@@ -125,12 +136,12 @@ class RLGPUAlgoObserver(AlgoObserver):
     def __init__(self):
         pass
 
-    def after_init(self, algo):
+    def after_init(self, algo, agent_idx=None):
         self.algo = algo
-        self.mean_scores = torch_ext.AverageMeter(1, self.algo.games_to_track).to(self.algo.ppo_device)
+        self.mean_scores = torch_ext.AverageMeter(1, self.algo.games_to_track1 if agent_idx == 0 else self.algo.games_to_track2 if agent_idx == 1 else self.algo.games_to_track).to(self.algo.ppo_device)
         self.ep_infos = []
         self.direct_info = {}
-        self.writer = self.algo.writer
+        self.writer = self.algo.writer1 if agent_idx == 0 else self.algo.writer2 if agent_idx == 1 else self.algo.writer
 
     def process_infos(self, infos, done_indices):
         assert isinstance(infos, dict), "RLGPUAlgoObserver expects dict info"
@@ -209,6 +220,55 @@ class RLGPUEnv(vecenv.IVecEnv):
         info['action_space'] = self.env.action_space
         info['observation_space'] = self.env.observation_space
         info['amp_observation_space'] = self.env.amp_observation_space
+
+        if self.use_global_obs:
+            info['state_space'] = self.env.state_space
+            print(info['action_space'], info['observation_space'], info['state_space'])
+        else:
+            print(info['action_space'], info['observation_space'])
+
+        return info
+    
+class RLEnv(vecenv.IVecEnv):
+    def __init__(self, config_name, num_actors, **kwargs):
+        self.env = env_configurations.configurations[config_name]['env_creator'](**kwargs)
+        self.num_agents = self.env.num_agents
+        self.num_agents1 = self.env.num_agents1
+        self.num_agents2 = self.env.num_agents2
+        self.use_global_obs = (self.env.num_states1 > 0 and self.env.num_states2 > 0)
+
+        self.full_state = {}
+        self.full_state["obs1"], self.full_state["obs2"] = self.reset()
+        if self.use_global_obs:
+            self.full_state["states1"], self.full_state["states2"] = self.env.get_state()
+        return
+
+    def step(self, action1, action2):
+        next_obs1, next_obs2, reward, is_done, info = self.env.step(action1, action2)
+
+        # todo: improve, return only dictinary
+        self.full_state["obs1"] = next_obs1
+        self.full_state["obs2"] = next_obs2
+        
+        if self.use_global_obs:
+            self.full_state["states1"], self.full_state["states2"] = self.env.get_state()
+        return self.full_state, reward, is_done, info
+
+    def reset(self, env_ids=None):
+        self.full_state["obs1"], self.full_state["obs2"] = self.env.reset(env_ids)
+        if self.use_global_obs:
+            self.full_state["states1"], self.full_state["states2"] = self.env.get_state()
+        return self.full_state
+
+    def get_number_of_agents(self):
+        return self.env.get_number_of_agents()
+
+    def get_env_info(self):
+        info = {}
+        info['action_space'] = self.env.action_space
+        info['observation_space'] = self.env.observation_space
+        info['amp_observation_space'] = self.env.amp_observation_space
+        info['num_agents'] = (self.num_agents1, self.num_agents2)
 
         if self.use_global_obs:
             info['state_space'] = self.env.state_space

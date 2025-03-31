@@ -103,6 +103,11 @@ python train.py task=MA_Ant_Sumo train=MA_Ant_SumoPPO headless=True
 python train.py task=MA_Ant_Battle train=MA_Ant_BattlePPO headless=True num_agents=2
 ```
 
+```bash
+# run training for Ant Bug_Battle task
+python train.py task=MA_Ant_Bug_Battle train=MA_Ant_Bug_BattlePPO headless=False max_iterations=500 num_agents1=2 num_agents2=1 num_envs=2 minibatch_size=1
+```
+
 Key arguments to the training script
 follow [IsaacGymEnvs Configuration and command line arguments](https://github.com/NVIDIA-Omniverse/IsaacGymEnvs/blob/main/README.md#configuration-and-command-line-arguments)
 .

@@ -99,7 +99,6 @@ class SPAgent(a2c_continuous.A2CAgent):
                 torch.cat((res_dict['actions'], res_dict_op['actions']), dim=0))
             step_time_end = time.time()
             step_time += (step_time_end - step_time_start)
-
             shaped_rewards = self.rewards_shaper(rewards)
             if self.value_bootstrap and 'time_outs' in infos:
                 shaped_rewards += self.gamma * res_dict['values'] * self.cast_obs(infos['time_outs']).unsqueeze(

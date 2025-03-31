@@ -43,7 +43,9 @@ test: False
 checkpoint: ''
 op_checkpoint: ''
 player_pool_type: ''
-num_agents: ${resolve_default:2,${...num_agents}}
+num_agents1: 0
+num_agents2: 0
+num_agents: 2
 
 
 # HRL Arguments

@@ -74,7 +74,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         ant_sensors_per_env = 4
         bug_sensors_per_env = 6
         self.vec_sensor_tensor = gymtorch.wrap_tensor(sensor_tensor).view(self.num_envs,
-                                                                          (ant_sensors_per_env + bug_sensors_per_env) * 6)
+                                                                          (ant_sensors_per_env * self.num_agents1 + bug_sensors_per_env * self.num_agents2) * 6)
         print(f'vec_sensor_tensor:{self.vec_sensor_tensor.shape}')
 
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -103,13 +103,13 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             
         self.ant_initial_dof_pos = torch.zeros_like(self.ant_agents_state[0][1], device=self.device, dtype=torch.float)
         zero_tensor = torch.tensor([0.0], device=self.device)
-        self.ant_initial_dof_pos = torch.where(self.dof_limits_lower > zero_tensor, self.dof_limits_lower,
-                                           torch.where(self.dof_limits_upper < zero_tensor, self.dof_limits_upper,
+        self.ant_initial_dof_pos = torch.where(self.ant_dof_limits_lower > zero_tensor, self.ant_dof_limits_lower,
+                                           torch.where(self.ant_dof_limits_upper < zero_tensor, self.ant_dof_limits_upper,
                                                        self.ant_initial_dof_pos))
         self.ant_initial_dof_vel = torch.zeros_like(self.ant_agents_state[0][2], device=self.device, dtype=torch.float)
         self.bug_initial_dof_pos = torch.zeros_like(self.bug_agents_state[0][1], device=self.device, dtype=torch.float)
-        self.bug_initial_dof_pos = torch.where(self.dof_limits_lower > zero_tensor, self.dof_limits_lower,
-                                           torch.where(self.dof_limits_upper < zero_tensor, self.dof_limits_upper,
+        self.bug_initial_dof_pos = torch.where(self.bug_dof_limits_lower > zero_tensor, self.bug_dof_limits_lower,
+                                           torch.where(self.bug_dof_limits_upper < zero_tensor, self.bug_dof_limits_upper,
                                                        self.bug_initial_dof_pos))
         self.bug_initial_dof_vel = torch.zeros_like(self.bug_agents_state[0][2], device=self.device, dtype=torch.float)
         self.dt = self.cfg["sim"]["dt"]
@@ -130,7 +130,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.obs_buf2 = torch.zeros((self.num_agents2 * self.num_envs, self.num_observations2), device=self.device,
                                    dtype=torch.float)                               
         self.rew_buf = torch.zeros(
-            (self.num_envs, 2), device=self.device, dtype=torch.float)
+            (self.num_envs, self.num_agents), device=self.device, dtype=torch.float)
         self.reset_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
         self.timeout_buf = torch.zeros(
             self.num_envs, device=self.device, dtype=torch.long)
@@ -139,11 +139,11 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.randomize_buf = torch.zeros(
             self.num_envs * self.num_agents, device=self.device, dtype=torch.long)
         self.extras = {'ranks': torch.zeros((self.num_envs, self.num_agents), device=self.device, dtype=torch.long),
-                       'win': torch.zeros((self.num_envs * (self.num_agents - 2),), device=self.device,
+                       'win': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
                                           dtype=torch.bool),
-                       'lose': torch.zeros((self.num_envs * (self.num_agents - 2),), device=self.device,
+                       'lose': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
                                            dtype=torch.bool),
-                       'draw': torch.zeros((self.num_envs * (self.num_agents - 2),), device=self.device,
+                       'draw': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
                                            dtype=torch.bool)}
 
     def create_sim(self):
@@ -207,13 +207,13 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         # self.num_bodies = self.gym.get_asset_rigid_body_count(ant_assets[0])
         # print("=====num_bodies=====", self.num_bodies)
         
-        for i in range(self.num_dof):
+        for i in range(self.ant_dof_cnt):
             ant_dof_props['driveMode'][i] = gymapi.DOF_MODE_POS
             ant_dof_props['stiffness'][i] = self.Kp
             ant_dof_props['damping'][i] = self.Kd
             
         bug_asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-        bug_asset_file = "mjcf/bug.xml"
+        bug_asset_file = "mjcf/temp.xml"
         bug_asset_path = os.path.join(bug_asset_root, bug_asset_file)
         bug_asset_root = os.path.dirname(bug_asset_path)
         bug_asset_file = os.path.basename(bug_asset_path)
@@ -223,7 +223,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             bug_asset = self.gym.load_asset(self.sim, bug_asset_root, bug_asset_file, asset_options)
             bug_assets.append(bug_asset)
         bug_dof_props = self.gym.get_asset_dof_properties(bug_assets[0])
-        for i in range(self.num_dof):
+        for i in range(self.bug_dof_cnt):
             bug_dof_props['driveMode'][i] = gymapi.DOF_MODE_POS
             bug_dof_props['stiffness'][i] = self.Kp
             bug_dof_props['damping'][i] = self.Kd
@@ -246,7 +246,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         ant_extremity_indices = [self.gym.find_asset_rigid_body_index(ant_assets[0], name) for name in ant_extremity_names]
         sensor_pose = gymapi.Transform()
         for body_idx in ant_extremity_indices:
-            self.gym.create_asset_force_sensor(ant_assets[0], body_idx, sensor_pose)
+            for agent_idx in range(self.num_agents1):
+                self.gym.create_asset_force_sensor(ant_assets[agent_idx], body_idx, sensor_pose)
 
         self.num_bodies_bug = self.gym.get_asset_rigid_body_count(bug_assets[0])
         bug_body_names = [self.gym.get_asset_rigid_body_name(bug_assets[0], i) for i in range(self.num_bodies_bug)]
@@ -259,7 +260,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
 
         bug_extremity_indices = [self.gym.find_asset_rigid_body_index(bug_assets[0], name) for name in bug_extremity_names]
         for body_idx in bug_extremity_indices:
-            self.gym.create_asset_force_sensor(bug_assets[0], body_idx, sensor_pose)
+            for agent_index in range(self.num_agents2):
+                self.gym.create_asset_force_sensor(bug_assets[0], body_idx, sensor_pose)
 
 
         # self.ant_handles = []
@@ -280,15 +282,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         #         self.gym.set_actor_dof_properties(env_ptr, ant_handle, dof_props)
         #         self.actor_indices.append(actor_index)
         #         self.gym.enable_actor_dof_force_sensors(env_ptr, ant_handle)
-        #         self.ant_handles.append(ant_handle)
-        #         for k in range(self.num_bodies):
-        #             self.gym.set_rigid_body_color(
-        #                 env_ptr, ant_handle, k, gymapi.MESH_VISUAL, self.ant_body_colors[j])
-        #     self.envs.append(env_ptr)
-
-        # dof_prop = self.gym.get_actor_dof_properties(self.envs[0], self.ant_handles[0])
-
-        # for j in range(self.num_dof):
+        #         self.ant_handles.append(ant_handle)self.num_dof
         #     if dof_prop['lower'][j] > dof_prop['upper'][j]:
         #         self.dof_limits_lower.append(dof_prop['upper'][j])
         #         self.dof_limits_upper.append(dof_prop['lower'][j])
@@ -308,8 +302,10 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.bug_handles = []
         self.actor_indices = []
         self.envs = []
-        self.dof_limits_lower = []
-        self.dof_limits_upper = []
+        self.ant_dof_limits_lower = []
+        self.ant_dof_limits_upper = []
+        self.bug_dof_limits_lower = []
+        self.bug_dof_limits_upper = []
 
         for i in range(self.num_envs):
             env_ptr = self.gym.create_env(self.sim, lower, upper, num_per_row)
@@ -321,7 +317,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                 self.gym.enable_actor_dof_force_sensors(env_ptr, ant_handle)
                 self.ant_handles.append(ant_handle)
                 for k in range(self.num_bodies_ant):
-                    self.gym.set_rigid_body_color(env_ptr, ant_handle, k, gymapi.MESH_VISUAL, self.ant_body_colors[j])
+                    self.gym.set_rigid_body_color(env_ptr, ant_handle, k, gymapi.MESH_VISUAL, self.ant_body_colors[0])
 
             for j in range(self.num_agents2):
                 bug_handle = self.gym.create_actor(env_ptr, bug_assets[j], start_pose, "bug_" + str(j), i, -1, 0)
@@ -332,22 +328,35 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                 self.bug_handles.append(bug_handle)
 
                 for k in range(self.num_bodies_bug):
-                    self.gym.set_rigid_body_color(env_ptr, bug_handle, k, gymapi.MESH_VISUAL, self.bug_body_colors[j])
+                    self.gym.set_rigid_body_color(env_ptr, bug_handle, k, gymapi.MESH_VISUAL, self.bug_body_colors[1])
 
             self.envs.append(env_ptr)
 
-        dof_prop = self.gym.get_actor_dof_properties(self.envs[0], self.ant_handles[0])
+        ant_dof_prop = self.gym.get_actor_dof_properties(self.envs[0], self.ant_handles[0])
+        print("ant dof_prop:", ant_dof_prop['upper'])
+        bug_dof_prop = self.gym.get_actor_dof_properties(self.envs[0], self.bug_handles[0])
+        print("bug dof_prop:", bug_dof_prop['upper'])
 
-        for j in range(self.num_dof):
-            if dof_prop['lower'][j] > dof_prop['upper'][j]:
-                self.dof_limits_lower.append(dof_prop['upper'][j])
-                self.dof_limits_upper.append(dof_prop['lower'][j])
+        for j in range(self.ant_dof_cnt):
+            if ant_dof_prop['lower'][j] > ant_dof_prop['upper'][j]:
+                self.ant_dof_limits_lower.append(ant_dof_prop['upper'][j])
+                self.ant_dof_limits_upper.append(ant_dof_prop['lower'][j])
             else:
-                self.dof_limits_lower.append(dof_prop['lower'][j])
-                self.dof_limits_upper.append(dof_prop['upper'][j])
+                self.ant_dof_limits_lower.append(ant_dof_prop['lower'][j])
+                self.ant_dof_limits_upper.append(ant_dof_prop['upper'][j])
+                
+        for j in range(self.bug_dof_cnt):
+            if bug_dof_prop['lower'][j] > bug_dof_prop['upper'][j]:
+                self.bug_dof_limits_lower.append(bug_dof_prop['upper'][j])
+                self.bug_dof_limits_upper.append(bug_dof_prop['lower'][j])
+            else:
+                self.bug_dof_limits_lower.append(bug_dof_prop['lower'][j])
+                self.bug_dof_limits_upper.append(bug_dof_prop['upper'][j])
 
-        self.dof_limits_lower = to_torch(self.dof_limits_lower, device=self.device)
-        self.dof_limits_upper = to_torch(self.dof_limits_upper, device=self.device)
+        self.ant_dof_limits_lower = to_torch(self.ant_dof_limits_lower, device=self.device)
+        self.ant_dof_limits_upper = to_torch(self.ant_dof_limits_upper, device=self.device)
+        self.bug_dof_limits_lower = to_torch(self.bug_dof_limits_lower, device=self.device)
+        self.bug_dof_limits_upper = to_torch(self.bug_dof_limits_upper, device=self.device)
         self.actor_indices = to_torch(self.actor_indices, device=self.device).to(dtype=torch.int32)
 
         for i in range(len(ant_extremity_names)):
@@ -398,8 +407,27 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                     self.ant_agents_state,
                     self.bug_agents_state,
                     self.progress_buf,
-                    self.dof_limits_lower,
-                    self.dof_limits_upper,
+                    self.ant_dof_limits_lower,
+                    self.ant_dof_limits_upper,
+                    self.bug_dof_limits_lower,
+                    self.bug_dof_limits_upper,
+                    self.dof_vel_scale,
+                    self.termination_height,
+                    self.borderline_space_unit,
+                    self.borderline_space,
+                    self.num_agents1,
+                    self.num_agents2,
+                    agent_idx,
+                )
+            else:
+                self.obs_buf2[(agent_idx - self.num_agents1) * self.num_envs:(agent_idx - self.num_agents1 + 1) * self.num_envs, :] = compute_agent_observations(
+                    self.ant_agents_state,
+                    self.bug_agents_state,
+                    self.progress_buf,
+                    self.ant_dof_limits_lower,
+                    self.ant_dof_limits_upper,
+                    self.bug_dof_limits_lower,
+                    self.bug_dof_limits_upper,
                     self.dof_vel_scale,
                     self.termination_height,
                     self.borderline_space_unit,
@@ -415,19 +443,21 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
 
-        positions = torch_rand_float(-0.2, 0.2, (len(env_ids), self.num_dof), device=self.device)
-        velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.num_dof), device=self.device)
+        ant_positions = torch_rand_float(-0.2, 0.2, (len(env_ids), self.ant_dof_cnt), device=self.device)
+        bug_positions = torch_rand_float(-0.2, 0.2, (len(env_ids), self.bug_dof_cnt), device=self.device)
+        ant_velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.ant_dof_cnt), device=self.device)
+        bug_velocities = torch_rand_float(-0.1, 0.1, (len(env_ids), self.bug_dof_cnt), device=self.device)
 
         for agent_idx in range(self.num_agents1):
             ant_root_state, ant_dof_pos, ant_dof_vel = self.ant_agents_state[agent_idx]
-            ant_dof_pos[env_ids] = tensor_clamp(self.ant_initial_dof_pos[env_ids] + positions, self.dof_limits_lower,
-                                            self.dof_limits_upper)
-            ant_dof_vel[env_ids] = velocities
+            ant_dof_pos[env_ids] = tensor_clamp(self.ant_initial_dof_pos[env_ids] + ant_positions, self.ant_dof_limits_lower,
+                                            self.ant_dof_limits_upper)
+            ant_dof_vel[env_ids] = ant_velocities
         for agent_idx in range(self.num_agents2):
             bug_root_state, bug_dof_pos, bug_dof_vel = self.bug_agents_state[agent_idx]
-            bug_dof_pos[env_ids] = tensor_clamp(self.bug_initial_dof_pos[env_ids] + positions, self.dof_limits_lower,
-                                            self.dof_limits_upper)
-            bug_dof_vel[env_ids] = velocities
+            bug_dof_pos[env_ids] = tensor_clamp(self.bug_initial_dof_pos[env_ids] + bug_positions, self.bug_dof_limits_lower,
+                                            self.bug_dof_limits_upper)
+            bug_dof_vel[env_ids] = bug_velocities
         agent_env_ids = expand_env_ids(env_ids, self.num_agents)
         env_ids_int32 = self.actor_indices[agent_env_ids]
         rand_angle = torch.rand((len(env_ids),), device=self.device) * torch.pi * 2  # generate angle in 0-360
@@ -482,7 +512,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             
         self.actions = torch.cat((self.actions1, self.actions2), dim=-1)
 
-        targets = torch.cat(self.actions, dim=-1)
+        targets = self.actions
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
@@ -575,48 +605,50 @@ def compute_agent_reward(
         num_agents2
 ):
     # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor]
+    # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
     obs1 = obs_buf1.view(num_agents1, -1, obs_buf1.shape[1])
     obs2 = obs_buf2.view(num_agents2, -1, obs_buf2.shape[1])
     nxt_rank_val = num_agents1 + num_agents2 - torch.count_nonzero(now_rank, dim=-1).view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
-    is_out = torch.sum(torch.square(torch.cat(obs1[:, :, 0:2], obs2[:, :, 0:2], dim=1)), dim=-1) >= \
+    is_out = torch.sum(torch.square(torch.cat((obs1[:, :, 0:2], obs2[:, :, 0:2]), dim=0)), dim=-1) >= \
              (borderline_space - progress_buf * borderline_space_unit).square()
     nxt_rank = torch.where((torch.transpose(is_out, 0, 1) > 0) & (now_rank == 0), nxt_rank_val, now_rank)
     # reset agents
     tmp_ones = torch.ones_like(reset_buf)
-    reset = torch.where(is_out[0, :], tmp_ones, reset_buf)
+    reset = torch.where(torch.min(is_out[:num_agents1], dim=0).values, tmp_ones, reset_buf)
     reset = torch.where(progress_buf >= max_episode_length - 1, tmp_ones, reset)
-    reset = torch.where(torch.min(is_out[1:], dim=0).values, tmp_ones, reset)
+    reset = torch.where(torch.min(is_out[num_agents1:], dim=0).values, tmp_ones, reset)
     tmp_reset = reset.view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
     nxt_rank = torch.where((tmp_reset == 1) & (nxt_rank == 0),
                            nxt_rank_val - 1,
                            nxt_rank)
     # compute metric logic
-    tmp_reset = reset.view(1, -1).repeat_interleave(num_agents1 + num_agents2 - 2, dim=0)
-    tmp_zeros = torch.zeros_like(is_out[1:], dtype=torch.bool)
-    wins = torch.ones_like(torch.cat(is_out[1:num_agents1], is_out[num_agents1 + 1:], dim=0), dtype=torch.bool)
+    tmp_reset = reset.view(1, -1).repeat_interleave(num_agents1 + num_agents2, dim=0)
+    tmp_zeros = torch.zeros_like(is_out, dtype=torch.bool)
+    wins = torch.ones_like(is_out, dtype=torch.bool)
     loses = torch.ones_like(wins, dtype=torch.bool)
-    draws = (progress_buf >= max_episode_length - 1).view(1, -1).repeat_interleave(num_agents1 + num_agents2 - 2, dim=0)
-    wins = torch.where(torch.cat(is_out[1:num_agents1], is_out[num_agents1 + 1:], dim=0), wins & (tmp_reset == 1), tmp_zeros)
-    draws = torch.where(torch.cat(is_out[1:num_agents1], is_out[num_agents1 + 1:], dim=0) == 0, draws & (tmp_reset == 1), tmp_zeros)
-    loses = torch.where(torch.cat(is_out[1:num_agents1], is_out[num_agents1 + 1:], dim=0) == 0, loses & (tmp_reset == 1) & (draws == 0), tmp_zeros)
+    draws = (progress_buf >= max_episode_length - 1).view(1, -1).repeat_interleave(num_agents1 + num_agents2, dim=0)
+    wins = torch.where(is_out, wins & (tmp_reset == 1), tmp_zeros) # (num_agents, num_envs)
+    draws = torch.where(is_out == 0, draws & (tmp_reset == 1), tmp_zeros)
+    loses = torch.where(is_out == 0, loses & (tmp_reset == 1) & (draws == 0), tmp_zeros)
 
-    sparse_reward = 1.0 * reset
-    reward_per_rank = 2 * win_reward_scale / (num_agents1 + num_agents2 - 2)
-    ant_sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank[:, 0] - 1) * reward_per_rank)
-    bug_sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank[:, num_agents1] - 1) * reward_per_rank)
-    ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[0, :, :2], dim=-1))
-    bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[0, :, :2], dim=-1))
-    ant_dof_at_limit_cost = torch.sum(obs1[0, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
-    bug_dof_at_limit_cost = torch.sum(obs2[0, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
-    ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]), dim=1) * action_cost_scale
-    bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]), dim=1) * action_cost_scale
+    sparse_reward = 1.0 * reset.unsqueeze(-1)
+    reward_per_rank = 2 * win_reward_scale / (num_agents1 + num_agents2)
+    sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
+    ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1))
+    bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[:, :, :2], dim=-1))
+    ant_dof_at_limit_cost = torch.sum(obs1[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
+    bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
+    ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1) * action_cost_scale
+    bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1) * action_cost_scale
     # print("torques:", torques[0, 2])
-    ant_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]), dim=1))
-    bug_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]), dim=1))
+    ant_not_move_penalty = torch.sum(torch.exp(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8)), dim=-1)
+    bug_not_move_penalty = torch.sum(torch.exp(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12)), dim=-1)
+    # print("shape used in the below two lines:", ant_dof_at_limit_cost.shape, ant_action_cost_penalty.shape, ant_not_move_penalty.shape, ant_stay_in_center_reward.shape)
     # print(f'action:...{action_cost_penalty.shape}')
-    ant_dense_reward = ant_dof_at_limit_cost + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward
-    bug_dense_reward = bug_dof_at_limit_cost + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward
-    total_reward = torch.cat(ant_sparse_reward + ant_dense_reward * dense_reward_scale, bug_sparse_reward + bug_dense_reward * dense_reward_scale, dim=-1)
+    ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)
+    bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1)
+    total_reward = sparse_reward + torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=-1)
+    # print('total_reward.shape:', total_reward.shape)
 
     return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten()
 
@@ -626,8 +658,10 @@ def compute_agent_observations(
         ant_agents_state,
         bug_agents_state,
         progress_buf,
-        dof_limits_lower,
-        dof_limits_upper,
+        ant_dof_limits_lower,
+        ant_dof_limits_upper,
+        bug_dof_limits_lower,
+        bug_dof_limits_upper,
         dof_vel_scale,
         termination_height,
         borderline_space_unit,
@@ -636,13 +670,15 @@ def compute_agent_observations(
         num_agents2,
         agent_idx,
 ):
-    # type: (List[Tuple[Tensor,Tensor,Tensor]],Tensor,Tensor,Tensor,float,float,float,float,int,int)->Tensor
+    # type: (List[Tuple[Tensor,Tensor,Tensor]], List[Tuple[Tensor, Tensor, Tensor]],Tensor,Tensor,Tensor,Tensor,Tensor,float,float,float,float,int,int, int)->Tensor
     # tot length:13+12+12+1+1+1+(num_agents-1)*(7+2+12+12+1+1)
     if agent_idx < num_agents1:
+        be_ant = True
         self_root_state, self_dof_pos, self_dof_vel = ant_agents_state[agent_idx]
     else:
+        be_ant = False
         self_root_state, self_dof_pos, self_dof_vel = bug_agents_state[agent_idx - num_agents1]
-    dof_pos_scaled = unscale(self_dof_pos, dof_limits_lower, dof_limits_upper)
+    dof_pos_scaled = unscale(self_dof_pos, ant_dof_limits_lower if be_ant else bug_dof_limits_lower, ant_dof_limits_upper if be_ant else bug_dof_limits_upper)
     now_border_space = (borderline_space - progress_buf * borderline_space_unit).unsqueeze(-1)
     
     # print all tensors' shape
@@ -656,10 +692,13 @@ def compute_agent_observations(
         if op_idx == agent_idx:
             continue
         if op_idx < num_agents1:
+            be_ant = True
             op_root_state, op_dof_pos, op_dof_vel = ant_agents_state[op_idx]
         else:
+            be_ant = False
             op_root_state, op_dof_pos, op_dof_vel = bug_agents_state[op_idx - num_agents1]
-        dof_pos_scaled = unscale(op_dof_pos, dof_limits_lower, dof_limits_upper)
+        dof_pos_scaled = unscale(op_dof_pos, ant_dof_limits_lower if be_ant else bug_dof_limits_lower, ant_dof_limits_upper if be_ant else bug_dof_limits_upper)
+
         obs = torch.cat((obs, op_root_state[:, :7], self_root_state[:, :2] - op_root_state[:, :2],
                          dof_pos_scaled, op_dof_vel * dof_vel_scale,
                          now_border_space - torch.sqrt(torch.sum(op_root_state[:, :2].square(), dim=-1)).unsqueeze(-1),

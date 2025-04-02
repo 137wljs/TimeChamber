@@ -107,7 +107,6 @@ class ContinuousA2CBase(A2CBase):
         play_time_start = time.time()
         with torch.no_grad():
             batch_dict1, batch_dict2 = self.play_steps()
-
         play_time_end = time.time()
         update_time_start = time.time()
 
@@ -115,6 +114,7 @@ class ContinuousA2CBase(A2CBase):
         self.curr_frames1 = batch_dict1.pop('played_frames')
         self.curr_frames2 = batch_dict2.pop('played_frames')
         self.curr_frames = self.curr_frames1 + self.curr_frames2
+        # print("batch_dict1['actions'].shape", batch_dict1['actions'].shape)
         self.prepare_dataset1(batch_dict1)
         self.prepare_dataset2(batch_dict2)
         self.algo_observer1.after_steps()
@@ -130,18 +130,45 @@ class ContinuousA2CBase(A2CBase):
         b_losses2 = []
         entropies2 = []
         kls2 = []
-
         for mini_ep in range(0, self.mini_epochs_num):
             ep_kls1 = []
-            ep_kls2 = []
             for i in range(len(self.dataset1)):
-                a_loss1, c_loss1, entropy1, kl1, last_lr1, lr_mul1, cmu1, csigma1, b_loss1, a_loss2, c_loss2, entropy2, kl2, last_lr2, lr_mul2, cmu2, csigma2, b_loss2 = self.train_actor_critic(self.dataset1[i], self.dataset2[i])
+                # for key in self.dataset1.values_dict.keys():
+                #     print(f"key {key}:", self.dataset1.values_dict[key][1])
+                a_loss1, c_loss1, entropy1, kl1, last_lr1, lr_mul1, cmu1, csigma1, b_loss1 = self.train_actor_critic1(self.dataset1[i])
                 a_losses1.append(a_loss1)
                 c_losses1.append(c_loss1)
                 ep_kls1.append(kl1)
                 entropies1.append(entropy1)
                 if self.bounds_loss_coef1 is not None:
                     b_losses1.append(b_loss1)
+
+                self.dataset1.update_mu_sigma(cmu1, csigma1)
+                if self.schedule_type == 'legacy':
+                    av_kls1 = kl1
+                    if self.multi_gpu:
+                        dist.all_reduce(kl1, op=dist.ReduceOp.SUM)
+                        av_kls1 /= self.world_size
+                    self.last_lr1, self.entropy_coef1 = self.scheduler1.update(self.last_lr1, self.entropy_coef1, self.epoch_num, 0, av_kls1.item())
+                    self.update_lr1(self.last_lr1)
+
+            av_kls1 = torch_ext.mean_list(ep_kls1)
+            if self.multi_gpu:
+                dist.all_reduce(av_kls1, op=dist.ReduceOp.SUM)
+                av_kls1 /= self.world_size
+            if self.schedule_type == 'standard':
+                self.last_lr1, self.entropy_coef1 = self.scheduler1.update(self.last_lr1, self.entropy_coef1, self.epoch_num, 0, av_kls1.item())
+                self.update_lr1(self.last_lr1)
+
+            kls1.append(av_kls1)
+            self.diagnostics1.mini_epoch(self, mini_ep)
+            if self.normalize_input:
+                self.model1.running_mean_std.eval() # don't need to update statstics more than one miniepoch
+                
+        for mini_ep in range(0, self.mini_epochs_num):
+            ep_kls2 = []
+            for i in range(len(self.dataset2)):
+                a_loss2, c_loss2, entropy2, kl2, last_lr2, lr_mul2, cmu2, csigma2, b_loss2 = self.train_actor_critic2(self.dataset2[i])
                 a_losses2.append(a_loss2)
                 c_losses2.append(c_loss2)
                 ep_kls2.append(kl2)
@@ -149,42 +176,28 @@ class ContinuousA2CBase(A2CBase):
                 if self.bounds_loss_coef2 is not None:
                     b_losses2.append(b_loss2)
 
-                self.dataset1.update_mu_sigma(cmu1, csigma1)
                 self.dataset2.update_mu_sigma(cmu2, csigma2)
                 if self.schedule_type == 'legacy':
-                    av_kls1 = kl1
                     av_kls2 = kl2
                     if self.multi_gpu:
-                        dist.all_reduce(kl1, op=dist.ReduceOp.SUM)
                         dist.all_reduce(kl2, op=dist.ReduceOp.SUM)
-                        av_kls1 /= self.world_size
                         av_kls2 /= self.world_size
-                    self.last_lr1, self.entropy_coef1 = self.scheduler1.update(self.last_lr1, self.entropy_coef1, self.epoch_num, 0, av_kls1.item())
                     self.last_lr2, self.entropy_coef2 = self.scheduler2.update(self.last_lr2, self.entropy_coef2, self.epoch_num, 0, av_kls2.item())
-                    self.update_lr1(self.last_lr1)
                     self.update_lr2(self.last_lr2)
 
-            av_kls1 = torch_ext.mean_list(ep_kls1)
             av_kls2 = torch_ext.mean_list(ep_kls2)
             if self.multi_gpu:
-                dist.all_reduce(av_kls1, op=dist.ReduceOp.SUM)
                 dist.all_reduce(av_kls2, op=dist.ReduceOp.SUM)
-                av_kls1 /= self.world_size
                 av_kls2 /= self.world_size
             if self.schedule_type == 'standard':
-                self.last_lr1, self.entropy_coef1 = self.scheduler1.update(self.last_lr1, self.entropy_coef1, self.epoch_num, 0, av_kls1.item())
                 self.last_lr2, self.entropy_coef2 = self.scheduler2.update(self.last_lr2, self.entropy_coef2, self.epoch_num, 0, av_kls2.item())
-                self.update_lr1(self.last_lr1)
                 self.update_lr2(self.last_lr2)
 
-            kls1.append(av_kls1)
             kls2.append(av_kls2)
-            self.diagnostics1.mini_epoch(self, mini_ep)
             self.diagnostics2.mini_epoch(self, mini_ep)
             if self.normalize_input:
-                self.model1.running_mean_std.eval() # don't need to update statstics more than one miniepoch
-                self.model2.running_mean_std.eval()
-
+                self.model2.running_mean_std.eval() # don't need to update statstics more than one miniepoch
+                
         update_time_end = time.time()
         play_time = play_time_end - play_time_start
         update_time = update_time_end - update_time_start
@@ -425,95 +438,128 @@ class ContinuousA2CBase(A2CBase):
     def get_masked_action_values(self, obs, action_masks):
         assert False
 
-    def calc_gradients(self, input_dict1, input_dict2):
-        value_preds_batch1 = input_dict1['old_values']
-        old_action_log_probs_batch1 = input_dict1['old_logp_actions']
-        advantage1 = input_dict1['advantages']
-        old_mu_batch1 = input_dict1['mu']
-        old_sigma_batch1 = input_dict1['sigma']
-        return_batch1 = input_dict1['returns']
-        actions_batch1 = input_dict1['actions']
-        obs_batch1 = input_dict1['obs']
-        obs_batch1 = self._preproc_obs(obs_batch1)
-        value_preds_batch2 = input_dict2['old_values']
-        old_action_log_probs_batch2 = input_dict2['old_logp_actions']
-        advantage2 = input_dict2['advantages']
-        old_mu_batch2 = input_dict2['mu']
-        old_sigma_batch2 = input_dict2['sigma']
-        return_batch2 = input_dict2['returns']
-        actions_batch2 = input_dict2['actions']
-        obs_batch2 = input_dict2['obs']
-        obs_batch2 = self._preproc_obs(obs_batch2)
+    def calc_gradients1(self, input_dict):
+        value_preds_batch = input_dict['old_values']
+        old_action_log_probs_batch = input_dict['old_logp_actions']
+        advantage = input_dict['advantages']
+        old_mu_batch = input_dict['mu']
+        old_sigma_batch = input_dict['sigma']
+        return_batch = input_dict['returns']
+        actions_batch = input_dict['actions']
+        obs_batch = input_dict['obs']
+        obs_batch = self._preproc_obs(obs_batch)
 
         lr_mul = 1.0
         curr_e_clip = self.e_clip
 
-        batch_dict1 = {
+        batch_dict = {
             'is_train': True,
-            'prev_actions': actions_batch1, 
-            'obs' : obs_batch1,
-        }
-        batch_dict2 = {
-            'is_train': True,
-            'prev_actions': actions_batch2, 
-            'obs' : obs_batch2,
+            'prev_actions': actions_batch, 
+            'obs' : obs_batch,
         }
 
+        # print all keys in batch_dict1
+        # for key in batch_dict1:
+        #     if key != 'is_train':
+        #         print(f"key {key}:", batch_dict1[key].shape)
+        
         with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-            res_dict = self.model1(batch_dict1)
-            action_log_probs1 = res_dict['prev_neglogp']
-            values1 = res_dict['values']
-            entropy1 = res_dict['entropy']
-            mu1 = res_dict['mus']
-            sigma1 = res_dict['sigmas']
+            res_dict = self.model1(batch_dict)                  #
+            action_log_probs = res_dict['prev_neglogp']
+            values = res_dict['values']
+            entropy = res_dict['entropy']
+            mu = res_dict['mus']
+            sigma = res_dict['sigmas']
 
-            a_loss1 = self.actor_loss_func1(old_action_log_probs_batch1, action_log_probs1, advantage1, self.ppo, curr_e_clip)
+            a_loss = self.actor_loss_func1(old_action_log_probs_batch, action_log_probs, advantage, self.ppo, curr_e_clip)              #
 
             if self.has_value_loss:
-                c_loss1 = common_losses.critic_loss(self.model1,value_preds_batch1, values1, curr_e_clip, return_batch1, self.clip_value)
+                c_loss = common_losses.critic_loss(self.model1, value_preds_batch, values, curr_e_clip, return_batch, self.clip_value)     #
             else:
-                c_loss1 = torch.zeros(1, device=self.ppo_device)
+                c_loss = torch.zeros(1, device=self.ppo_device)
             if self.bound_loss_type == 'regularisation':
-                b_loss1 = self.reg_loss(mu1)
+                b_loss = self.reg_loss(mu)
             elif self.bound_loss_type == 'bound':
-                b_loss1 = self.bound_loss(mu1)
+                b_loss = self.bound_loss(mu)
             else:
-                b_loss1 = torch.zeros(1, device=self.ppo_device)
-            losses1 = torch_ext.apply_masks([a_loss1.unsqueeze(1), c_loss1 , entropy1.unsqueeze(1), b_loss1.unsqueeze(1)])
-            a_loss1, c_loss1, entropy1, b_loss1 = losses1[0], losses1[1], losses1[2], losses1[3]
+                b_loss = torch.zeros(1, device=self.ppo_device)
+            losses = torch_ext.apply_masks([a_loss.unsqueeze(1), c_loss , entropy.unsqueeze(1), b_loss.unsqueeze(1)])
+            a_loss, c_loss, entropy, b_loss = losses[0], losses[1], losses[2], losses[3]
 
-            loss1 = a_loss1 + 0.5 * c_loss1 * self.critic_coef1 - entropy1 * self.entropy_coef1 + b_loss1 * self.bounds_loss_coef1
+            loss = a_loss + 0.5 * c_loss * self.critic_coef1 - entropy * self.entropy_coef1 + b_loss * self.bounds_loss_coef1
             
             if self.multi_gpu:
                 self.optimizer1.zero_grad()
             else:
                 for param in self.model1.parameters():
                     param.grad = None
-                    
-        with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-            res_dict = self.model2(batch_dict2)
-            action_log_probs2 = res_dict['prev_neglogp']
-            values2 = res_dict['values']    
-            entropy2 = res_dict['entropy']
-            mu2 = res_dict['mus']
-            sigma2 = res_dict['sigmas']
 
-            a_loss2 = self.actor_loss_func2(old_action_log_probs_batch2, action_log_probs2, advantage2, self.ppo, curr_e_clip)
+        self.scaler1.scale(loss).backward()                                                     #
+        #TODO: Refactor this ugliest code of they year
+        self.trancate_gradients_and_step1()                                                         #
+
+        with torch.no_grad():
+            reduce_kl = True
+            kl_dist = torch_ext.policy_kl(mu.detach(), sigma.detach(), old_mu_batch, old_sigma_batch, reduce_kl)
+
+        self.diagnostics1.mini_batch(self,                      #
+        {
+            'values' : value_preds_batch,
+            'returns' : return_batch,
+            'new_neglogp' : action_log_probs,
+            'old_neglogp' : old_action_log_probs_batch,
+            'masks' : None,
+        }, curr_e_clip, 0)
+        
+
+        self.train_result1 = (a_loss, c_loss, entropy, \
+            kl_dist, self.last_lr1, lr_mul, \
+            mu.detach(), sigma.detach(), b_loss)
+        
+    def calc_gradients2(self, input_dict):
+        value_preds_batch = input_dict['old_values']
+        old_action_log_probs_batch = input_dict['old_logp_actions']
+        advantage = input_dict['advantages']
+        old_mu_batch = input_dict['mu']
+        old_sigma_batch = input_dict['sigma']
+        return_batch = input_dict['returns']
+        actions_batch = input_dict['actions']
+        obs_batch = input_dict['obs']
+        obs_batch = self._preproc_obs(obs_batch)
+
+        lr_mul = 1.0
+        curr_e_clip = self.e_clip
+
+        batch_dict = {
+            'is_train': True,
+            'prev_actions': actions_batch, 
+            'obs' : obs_batch,
+        }
+        
+        with torch.cuda.amp.autocast(enabled=self.mixed_precision):
+            res_dict = self.model2(batch_dict)
+            action_log_probs = res_dict['prev_neglogp']
+            values = res_dict['values']
+            entropy = res_dict['entropy']
+            mu = res_dict['mus']
+            sigma = res_dict['sigmas']
+
+            a_loss = self.actor_loss_func2(old_action_log_probs_batch, action_log_probs, advantage, self.ppo, curr_e_clip)
 
             if self.has_value_loss:
-                c_loss2 = common_losses.critic_loss(self.model2,value_preds_batch2, values2, curr_e_clip, return_batch2, self.clip_value)
+                c_loss = common_losses.critic_loss(self.model2, value_preds_batch, values, curr_e_clip, return_batch, self.clip_value)
             else:
-                c_loss2 = torch.zeros(1, device=self.ppo_device)
+                c_loss = torch.zeros(1, device=self.ppo_device)
             if self.bound_loss_type == 'regularisation':
-                b_loss2 = self.reg_loss(mu2)
+                b_loss = self.reg_loss(mu)
             elif self.bound_loss_type == 'bound':
-                b_loss2 = self.bound_loss(mu2)
+                b_loss = self.bound_loss(mu)
             else:
-                b_loss2 = torch.zeros(1, device=self.ppo_device)
-            losses2 = torch_ext.apply_masks([a_loss2.unsqueeze(1), c_loss2 , entropy2.unsqueeze(1), b_loss2.unsqueeze(1)])
-            a_loss2, c_loss2, entropy2, b_loss2 = losses2[0], losses2[1], losses2[2], losses2[3]
-            
-            loss2 = a_loss2 + 0.5 * c_loss2 * self.critic_coef2 - entropy2 * self.entropy_coef2 + b_loss2 * self.bounds_loss_coef2
+                b_loss = torch.zeros(1, device=self.ppo_device)
+            losses = torch_ext.apply_masks([a_loss.unsqueeze(1), c_loss , entropy.unsqueeze(1), b_loss.unsqueeze(1)])
+            a_loss, c_loss, entropy, b_loss = losses[0], losses[1], losses[2], losses[3]
+
+            loss = a_loss + 0.5 * c_loss * self.critic_coef2 - entropy * self.entropy_coef2 + b_loss * self.bounds_loss_coef2
             
             if self.multi_gpu:
                 self.optimizer2.zero_grad()
@@ -521,36 +567,35 @@ class ContinuousA2CBase(A2CBase):
                 for param in self.model2.parameters():
                     param.grad = None
 
-        self.scaler1.scale(loss1).backward()
-        self.scaler2.scale(loss2).backward()
+        self.scaler2.scale(loss).backward()                                                     #
         #TODO: Refactor this ugliest code of they year
-        self.trancate_gradients_and_step()
+        self.trancate_gradients_and_step2()                                                         #
 
         with torch.no_grad():
             reduce_kl = True
-            kl_dist1 = torch_ext.policy_kl(mu1.detach(), sigma1.detach(), old_mu_batch1, old_sigma_batch1, reduce_kl)
-            kl_dist2 = torch_ext.policy_kl(mu2.detach(), sigma2.detach(), old_mu_batch2, old_sigma_batch2, reduce_kl)
+            kl_dist = torch_ext.policy_kl(mu.detach(), sigma.detach(), old_mu_batch, old_sigma_batch, reduce_kl)
 
-        self.diagnostics1.mini_batch(self,
+        self.diagnostics2.mini_batch(self,                      #
         {
-            'values' : value_preds_batch1,
-            'returns' : return_batch1,
-            'new_neglogp' : action_log_probs1,
-            'old_neglogp' : old_action_log_probs_batch1,
+            'values' : value_preds_batch,
+            'returns' : return_batch,
+            'new_neglogp' : action_log_probs,
+            'old_neglogp' : old_action_log_probs_batch,
             'masks' : None,
         }, curr_e_clip, 0)
         
 
-        self.train_result = (a_loss1, c_loss1, entropy1, \
-            kl_dist1, self.last_lr1, lr_mul, \
-            mu1.detach(), sigma1.detach(), b_loss1, \
-            a_loss2, c_loss2, entropy2, \
-            kl_dist2, self.last_lr2, lr_mul, \
-            mu2.detach(), sigma2.detach(), b_loss2)
-
-    def train_actor_critic(self, input_dict1, input_dict2):
-        self.calc_gradients(input_dict1, input_dict2)
-        return self.train_result
+        self.train_result2 = (a_loss, c_loss, entropy, \
+            kl_dist, self.last_lr2, lr_mul, \
+            mu.detach(), sigma.detach(), b_loss)        
+        
+    def train_actor_critic1(self, input_dict):
+        self.calc_gradients1(input_dict)
+        return self.train_result1
+    
+    def train_actor_critic2(self, input_dict):
+        self.calc_gradients2(input_dict)
+        return self.train_result2
 
     def reg_loss(self, mu):
         if self.bounds_loss_coef1 is not None and self.bounds_loss_coef2 is not None:

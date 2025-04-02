@@ -12,7 +12,6 @@ class ModelA2CContinuousLogStd(BaseModel):
         super(BaseModel, self).__init__()
         actions_num = keys.get('actions_num')
         input_shape = keys.get('input_shape')
-        print("input_shape", input_shape)
         self.normalize_value = params["config"].get('normalize_value', False)
         self.normalize_input = params["config"].get('normalize_input', False)
         self.value_size = params["config"].get('value_size', 1)
@@ -132,6 +131,7 @@ class ModelA2CContinuousLogStd(BaseModel):
                 out = torch.cat((input_dict['obs']['observation'], a_cnn_out), dim=-1)
                 norm_out = self.norm_observation(out)
             else:
+                # print("input_dict['obs'].shape", input_dict['obs'].shape)
                 norm_out = self.norm_obs(input_dict['obs'])
             
             a_out = c_out = self.actor_mlp(norm_out)

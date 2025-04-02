@@ -2,6 +2,7 @@ from timechamber.learning.lib.core import torch_ext
 import torch
 import torch.nn as nn
 import numpy as np
+import traceback
 '''
 updates statistic from a full data
 '''
@@ -48,6 +49,12 @@ class RunningMeanStd(nn.Module):
                 mean, var = torch_ext.get_mean_std_with_masks(input, mask)
             else:
                 mean = input.mean(self.axis) # along channel axis
+                if input.size()[0] <= 2:
+                    print("reach error")
+                    stack = traceback.format_stack()
+                    print(''.join(stack))
+                    print(input.size())
+                    assert(False)
                 var = input.var(self.axis)
             self.running_mean, self.running_var, self.count = self._update_mean_var_count_from_moments(self.running_mean, self.running_var, self.count, 
                                                     mean, var, input.size()[0] )

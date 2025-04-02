@@ -336,7 +336,7 @@ class A2CBase(BaseAlgorithm):
         # soft augmentation not yet supported
         assert not self.has_soft_aug
 
-    def trancate_gradients_and_step(self):
+    def trancate_gradients_and_step1(self):
         # if self.multi_gpu:
         #     # batch allreduce ops: see https://github.com/entity-neural-network/incubator/pull/220
         #     all_grads_list = []
@@ -356,13 +356,17 @@ class A2CBase(BaseAlgorithm):
 
         if self.truncate_grads:
             self.scaler1.unscale_(self.optimizer1)
-            self.scaler2.unscale_(self.optimizer2)
             nn.utils.clip_grad_norm_(self.model1.parameters(), self.grad_norm1)
-            nn.utils.clip_grad_norm_(self.model2.parameters(), self.grad_norm2)
 
         self.scaler1.step(self.optimizer1)
-        self.scaler2.step(self.optimizer2)
         self.scaler1.update()
+        
+    def trancate_gradients_and_step2(self):
+        if self.truncate_grads:
+            self.scaler2.unscale_(self.optimizer2)
+            nn.utils.clip_grad_norm_(self.model2.parameters(), self.grad_norm2)
+
+        self.scaler2.step(self.optimizer2)
         self.scaler2.update()
 
     def write_stats1(self, total_time, epoch_num, step_time, play_time, update_time, a_losses, c_losses, entropies, kls, last_lr, lr_mul, frame, scaled_time, scaled_play_time, curr_frames):
@@ -844,11 +848,11 @@ class A2CBase(BaseAlgorithm):
             self.experience_buffer2.update_data('obses', n, self.obs['obs2'])
             self.experience_buffer2.update_data('dones', n, self.dones.unsqueeze(1).repeat(1, self.num_agents2).view(-1))
 
-            # for k in update_list1:
-            #     res_dict1[k] = res_dict1[k].view(self.batch_size1, self.num_agents1, -1)
-            #     res_dict2[k] = res_dict2[k].view(self.batch_size2, self.num_agents2, -1)
-            #     self.experience_buffer1.update_data(k, n, res_dict1[k])
-            #     self.experience_buffer2.update_data(k, n, res_dict2[k])
+            for k in update_list:
+                self.experience_buffer1.update_data(k, n, res_dict1[k])
+                self.experience_buffer2.update_data(k, n, res_dict2[k])
+            # if self.has_central_value:
+            #     self.experience_buffer.update_data('states', n, self.obs['states'])
             
             # res_dict1['actions'] = res_dict1['actions'].view(self.batch_size1 * self.num_agents1, -1)
             # res_dict2['actions'] = res_dict2['actions'].view(self.batch_size2 * self.num_agents2, -1)
@@ -917,6 +921,7 @@ class A2CBase(BaseAlgorithm):
         mb_returns2 = mb_advs2 + mb_values2
 
         batch_dict1 = self.experience_buffer1.get_transformed_list(swap_and_flatten01, self.tensor_list)
+        # print("==========", batch_dict1["actions"].shape)
         batch_dict1['returns'] = swap_and_flatten01(mb_returns1)
         batch_dict1['played_frames'] = self.batch_size1
         batch_dict1['step_time'] = step_time

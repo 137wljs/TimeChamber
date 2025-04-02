@@ -412,7 +412,7 @@ class ContinuousA2CBase(A2CBase):
                         mean_rewards = -np.inf
 
                     self.save(os.path.join(self.nn_dir, 'last_' + self.config['name'] + '_ep_' + str(epoch_num) \
-                        + '_rew_' + str(mean_rewards).replace('[', '_').replace(']', '_')))
+                        + '_rew1_' + str(mean_rewards1[0]) + '_rew2_' + str(mean_rewards2[0]).replace('[', '_').replace(']', '_')))
                     print('MAX EPOCHS NUM!')
                     should_exit = True
 
@@ -422,7 +422,7 @@ class ContinuousA2CBase(A2CBase):
                         mean_rewards = -np.inf
 
                     self.save(os.path.join(self.nn_dir, 'last_' + self.config['name'] + '_frame_' + str(self.frame) \
-                        + '_rew_' + str(mean_rewards).replace('[', '_').replace(']', '_')))
+                        + '_rew1_' + str(mean_rewards1[0]) + '_rew2_' + str(mean_rewards2[0]).replace('[', '_').replace(']', '_')))
                     print('MAX FRAMES NUM!')
                     should_exit = True
 

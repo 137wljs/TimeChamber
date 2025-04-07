@@ -56,6 +56,7 @@ from timechamber.learning import hrl_sp_player
 from timechamber.learning import vectorized_models
 from timechamber.learning import vectorized_network_builder
 from timechamber.learning.lib.agent.a2c_continuous import A2CAgent
+from timechamber.learning.lib.agent.players import A2CPlayer
 import timechamber
 
 
@@ -153,6 +154,7 @@ def launch_rlg_hydra(cfg: DictConfig):
 
         runner.player_factory.register_builder('self_play_continuous',
                                                lambda **kwargs: ppo_sp_player.SPPlayer(**kwargs))
+        runner.player_factory.register_builder('va_a2c', lambda **kwargs: A2CPlayer(**kwargs))
         runner.player_factory.register_builder('self_play_hrl',
                                                lambda **kwargs: hrl_sp_player.HRLSPPlayer(**kwargs))
         # runner.

@@ -144,7 +144,9 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                        'lose': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
                                            dtype=torch.bool),
                        'draw': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
-                                           dtype=torch.bool)}
+                                           dtype=torch.bool),
+                       'out': torch.zeros((self.num_envs, self.num_agents,), device=self.device, dtype=torch.bool),
+                    }
 
     def create_sim(self):
         self.up_axis_idx = self.set_sim_params_up_axis(self.sim_params, 'z')
@@ -373,8 +375,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
     def compute_reward(self, actions1, actions2):
 
         self.rew_buf[:], self.reset_buf[:], self.extras['ranks'][:], self.extras['win'], self.extras['lose'], \
-        self.extras[
-            'draw'] = compute_agent_reward(
+        self.extras['draw'], self.extras['out'] = compute_agent_reward(
             self.obs_buf1,
             self.obs_buf2,
             self.reset_buf,
@@ -604,7 +605,7 @@ def compute_agent_reward(
         num_agents1,
         num_agents2
 ):
-    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor, Tensor]
     # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
     obs1 = obs_buf1.view(num_agents1, -1, obs_buf1.shape[1])
     obs2 = obs_buf2.view(num_agents2, -1, obs_buf2.shape[1])
@@ -650,7 +651,7 @@ def compute_agent_reward(
     total_reward = sparse_reward + torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
     # print('total_reward.shape:', total_reward.shape)
 
-    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten()
+    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out
 
 
 @torch.jit.script

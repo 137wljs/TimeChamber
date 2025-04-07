@@ -98,7 +98,7 @@ class ContinuousA2CBase(A2CBase):
     def init_tensors(self):
         A2CBase.init_tensors(self)
         self.update_list = ['actions', 'neglogpacs', 'values', 'mus', 'sigmas']
-        self.tensor_list = self.update_list + ['obses', 'states', 'dones']
+        self.tensor_list = self.update_list + ['obses', 'states', 'dones', 'outs']
 
     def train_epoch(self):
         # super().train_epoch()   # useless?
@@ -214,6 +214,7 @@ class ContinuousA2CBase(A2CBase):
         neglogpacs = batch_dict['neglogpacs']
         mus = batch_dict['mus']
         sigmas = batch_dict['sigmas']
+        outs = batch_dict['outs']
 
         advantages = returns - values
 
@@ -241,8 +242,10 @@ class ContinuousA2CBase(A2CBase):
         dataset_dict['dones'] = dones
         dataset_dict['mu'] = mus
         dataset_dict['sigma'] = sigmas
+        dataset_dict['outs'] = outs
 
         self.dataset1.update_values_dict(dataset_dict)
+        self.dataset1.clear_out_infos()
         
     def prepare_dataset2(self, batch_dict):
         obses = batch_dict['obses']
@@ -253,6 +256,7 @@ class ContinuousA2CBase(A2CBase):
         neglogpacs = batch_dict['neglogpacs']
         mus = batch_dict['mus']
         sigmas = batch_dict['sigmas']
+        outs = batch_dict['outs']
 
         advantages = returns - values
 
@@ -280,8 +284,10 @@ class ContinuousA2CBase(A2CBase):
         dataset_dict['dones'] = dones
         dataset_dict['mu'] = mus
         dataset_dict['sigma'] = sigmas
+        dataset_dict['outs'] = outs
 
         self.dataset2.update_values_dict(dataset_dict)
+        self.dataset2.clear_out_infos()
 
     def train(self):
         self.init_tensors()

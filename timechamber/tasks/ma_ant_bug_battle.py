@@ -29,10 +29,10 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.dof_vel_scale = self.cfg["env"]["dofVelocityScale"]
         self.ant_agents_state = []
         self.bug_agents_state = []
-        self.win_reward_scale = 2000
+        self.win_reward_scale = 1000
         self.move_to_op_reward_scale = 1.
-        self.stay_in_center_reward_scale = 0.2
-        self.action_cost_scale = -0.000025
+        self.stay_in_center_reward_scale = 20
+        self.action_cost_scale = -0.0025
         self.push_scale = 1.
         self.dense_reward_scale = 1.0
         self.hp_decay_scale = 1.
@@ -40,6 +40,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.Kd = self.cfg["env"]["control"]["damping"]
         self.cfg["env"]["numObservations1"] = 32 + 27 * (self.cfg["env"].get("numAgents1", 1) - 1) + 35 * (self.cfg["env"].get("numAgents2", 1))  # 1 for ant, 2 for bug
         self.cfg["env"]["numObservations2"] = 40 + 27 * (self.cfg["env"].get("numAgents1", 1)) + 35 * (self.cfg["env"].get("numAgents2", 1) - 1)  # 1 for ant, 2 for bug
+        # self.cfg["env"]["numObservations1"] = 32
+        # self.cfg["env"]["numObservations2"] = 40
         self.cfg["env"]["numActions1"] = 8
         self.cfg["env"]["numActions2"] = 12
         self.ant_dof_cnt = 8
@@ -633,12 +635,12 @@ def compute_agent_reward(
     loses = torch.where(is_out == 0, loses & (tmp_reset == 1) & (draws == 0), tmp_zeros)
 
     sparse_reward = 1.0 * reset.unsqueeze(-1)
-    reward_per_rank = 2 * win_reward_scale / (num_agents1 + num_agents2)
+    reward_per_rank = win_reward_scale / (num_agents1 + num_agents2)
     sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
     ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1))
     bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[:, :, :2], dim=-1))
     ant_dof_at_limit_cost = torch.sum(obs1[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
-    bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
+    bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:25] > 0.99, dim=-1) * joints_at_limit_cost_scale
     ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1) * action_cost_scale
     bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1) * action_cost_scale
     # print("torques:", torques[0, 2])
@@ -648,7 +650,19 @@ def compute_agent_reward(
     # print(f'action:...{action_cost_penalty.shape}')
     ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)
     bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1)
-    total_reward = sparse_reward + torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
+    # ant_dense_reward = ant_stay_in_center_reward.transpose(0, 1)
+    # bug_dense_reward = bug_stay_in_center_reward.transpose(0, 1)
+    # print(f"ant_dof_at_limit_cost:{ant_dof_at_limit_cost.transpose(0,1)}")
+    # print(f"bug_dof_at_limit_cost:{bug_dof_at_limit_cost.transpose(0,1)}")
+    # print(f"ant_action_cost_penalty:{ant_action_cost_penalty}")
+    # print(f"bug_action_cost_penalty:{bug_action_cost_penalty}")
+    # print(f"ant_not_move_penalty:{ant_not_move_penalty}")
+    # print(f"bug_not_move_penalty:{bug_not_move_penalty}")
+    # print(f"ant_stay_in_center_reward:{ant_stay_in_center_reward.transpose(0,1)}")
+    # print(f"bug_stay_in_center_reward:{bug_stay_in_center_reward.transpose(0,1)}")
+    # print(f"sparse_reward:{sparse_reward}")
+    total_reward = torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
+    # print(f"out_info:{is_out}")
     # print('total_reward.shape:', total_reward.shape)
 
     return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out
@@ -704,7 +718,6 @@ def compute_agent_observations(
                          dof_pos_scaled, op_dof_vel * dof_vel_scale,
                          now_border_space - torch.sqrt(torch.sum(op_root_state[:, :2].square(), dim=-1)).unsqueeze(-1),
                          torch.unsqueeze(op_root_state[:, 2] < termination_height, -1)), dim=-1)
-    # print(obs.shape)
     return obs
 
 

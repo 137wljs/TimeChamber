@@ -70,6 +70,8 @@ class ContinuousA2CBase(A2CBase):
             'normalize_input': self.normalize_input,
         }
         self.model2 = ModelA2CContinuousLogStd(params, keys2)
+        print("obs_shape1", self.obs_shape1)
+        print("obs_shape2", self.obs_shape2)
 
     def preprocess_actions1(self, actions):
         if self.clip_actions:

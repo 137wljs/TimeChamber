@@ -859,6 +859,12 @@ class A2CBase(BaseAlgorithm):
             step_time_start = time.time()
             self.obs, rewards, self.dones, infos = self.env_step(res_dict1['actions'], res_dict2['actions'])
             step_time_end = time.time()
+            if infos.get('out', None) is not None:
+                outs = infos['out']
+                outs1 = outs[:self.num_agents1].reshape(-1).unsqueeze(1)
+                outs2 = outs[self.num_agents1:].reshape(-1).unsqueeze(1)
+                self.experience_buffer1.update_data('outs', n, outs1)
+                self.experience_buffer2.update_data('outs', n, outs2)
 
             step_time += (step_time_end - step_time_start)
             # print("rewards.shape", rewards.shape)

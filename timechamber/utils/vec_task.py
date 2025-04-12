@@ -77,8 +77,8 @@ class VaVecTask():
         self.num_actions1 = task.num_actions1
         self.num_actions2 = task.num_actions2
 
-        self.obs_space1 = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
-        self.obs_space2 = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        self.obs_space1 = spaces.Box(np.ones(self.num_observations1) * -np.Inf, np.ones(self.num_observations1) * np.Inf)
+        self.obs_space2 = spaces.Box(np.ones(self.num_observations2) * -np.Inf, np.ones(self.num_observations2) * np.Inf)
         self.state_space1 = spaces.Box(np.ones(self.num_states1) * -np.Inf, np.ones(self.num_states1) * np.Inf)
         self.state_space2 = spaces.Box(np.ones(self.num_states2) * -np.Inf, np.ones(self.num_states2) * np.Inf)
         self.act_space1 = spaces.Box(np.ones(self.num_actions1) * -1., np.ones(self.num_actions1) * 1.)

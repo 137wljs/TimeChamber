@@ -15,7 +15,9 @@ class PPODataset(Dataset):
         self.is_continuous = not is_discrete
 
     def update_values_dict(self, values_dict):
-        self.values_dict = values_dict     
+        self.values_dict = values_dict
+        if self.values_dict is not None:
+            self.length = (self.values_dict['outs'] == 0).sum() // self.minibatch_size
 
     def update_mu_sigma(self, mu, sigma):
         start = self.last_range[0]	           
@@ -25,6 +27,24 @@ class PPODataset(Dataset):
 
     def __len__(self):
         return self.length
+    
+    def clear_out_infos(self):
+        outs = self.values_dict.get('outs')
+        if outs is None:
+            return
+
+        zero_mask = (outs.view(-1) == 0)
+
+        for k, v in self.values_dict.items():
+            if v is None:
+                continue
+            if isinstance(v, dict):
+                self.values_dict[k] = {
+                    sub_k: sub_v[zero_mask] for sub_k, sub_v in v.items()
+                }
+            else:
+                self.values_dict[k] = v[zero_mask]
+        
 
     def _get_item(self, idx):
         start = idx * self.minibatch_size

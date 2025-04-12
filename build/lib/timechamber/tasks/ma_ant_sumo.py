@@ -196,7 +196,6 @@ class MA_Ant_Sumo(MA_VecTask):
         start_pose_op = gymapi.Transform()
         start_pose_op.p = gymapi.Vec3(self.borderline_space - 1, self.borderline_space - 1, 1.)
 
-        print("===========看看初始位置=============")
         print(start_pose.p, start_pose_op.p)
         self.start_rotation = torch.tensor([start_pose.r.x, start_pose.r.y, start_pose.r.z, start_pose.r.w],
                                            device=self.device)

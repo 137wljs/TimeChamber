@@ -1,6 +1,5 @@
 # used to create the object
-name: MA_Ant_Bug_Battle
-# name: MA_Ant_Bug_Run_To_Goal # 借用一下这个yaml文件 这个参数记得删除
+name: MA_Ant_Bug_Run_To_Goal
 
 physics_engine: ${..physics_engine}
 
@@ -13,9 +12,9 @@ env:
   # rgb color of Ant body
   color: [ [ 0.97, 0.38, 0.06 ],[ 0.24, 0.38, 0.06 ],[ 0.56, 0.85, 0.25 ],[ 0.56, 0.85, 0.25 ],[ 0.14, 0.97, 0.24 ],[ 0.63, 0.2, 0.87 ] ]
   envSpacing: 6
-  borderlineSpace: 3
-  stretch_factor: 3  # 借用一下这个yaml文件 这个参数记得删除
-  paralleline_space: 6.0 # 借用一下这个yaml文件 这个参数记得删除
+  borderlineSpace: 3 # 在sumo场景表示边界(圆)的半径，而不是边界和ant的最小距离，从_add_circle_borderline函数可知含义
+  stretch_factor: 3 # 表示两条终点线拉伸程度的系数
+  paralleline_space: 6.0 # 表示原点到平行线边界的距离
   episodeLength: 1000
   enableDebugVis: False
   controlFrequencyInv: 1

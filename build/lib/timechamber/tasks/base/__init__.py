@@ -25,21 +25,3 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-
-from .ma_ant_sumo import MA_Ant_Sumo
-from .ma_ant_battle import MA_Ant_Battle
-from .ma_bug_battle import MA_Bug_Battle
-from .ma_ant_bug_battle import MA_Ant_Bug_Battle
-from .ma_ant_bug_run_to_goal import MA_Ant_Bug_Run_To_Goal
-from .ma_humanoid_strike import HumanoidStrike
-
-# Mappings from strings to environments
-isaacgym_task_map = {
-    "MA_Ant_Sumo": MA_Ant_Sumo,
-    "MA_Ant_Battle": MA_Ant_Battle,
-    "MA_Bug_Battle": MA_Bug_Battle,
-    "MA_Ant_Bug_Battle": MA_Ant_Bug_Battle,
-    "MA_Humanoid_Strike": HumanoidStrike,
-    "MA_Ant_Bug_Run_To_Goal": MA_Ant_Bug_Run_To_Goal
-}

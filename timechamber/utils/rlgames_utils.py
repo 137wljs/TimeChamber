@@ -100,7 +100,7 @@ def get_rlgames_env_creator(
                                        task_config.get("clip_observations", np.inf),
                                        task_config.get("clip_actions", 1.0),
                                        AMP=True)
-        elif task_name == "MA_Ant_Bug_Battle":
+        elif task_name == "MA_Ant_Bug_Battle" or task_name == "MA_Ant_Bug_Run_To_Goal": 
             task = isaacgym_task_map[task_name](
                 cfg=task_config,
                 rl_device=rl_device,

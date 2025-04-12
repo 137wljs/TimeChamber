@@ -10,7 +10,7 @@ from timechamber.utils.torch_jit_utils import *
 from .base.ma_vec_task import MA_VecTask
 
 
-class MA_Ant_Battle(MA_VecTask):
+class MA_Bug_Battle(MA_VecTask):
 
     def __init__(self, cfg, sim_device, rl_device, graphics_device_id, headless, virtual_screen_capture, force_render):
         
@@ -37,8 +37,8 @@ class MA_Ant_Battle(MA_VecTask):
         self.hp_decay_scale = 1.
         self.Kp = self.cfg["env"]["control"]["stiffness"]
         self.Kd = self.cfg["env"]["control"]["damping"]
-        self.cfg["env"]["numObservations"] = 32 + 27 * (self.cfg["env"].get("numAgents", 1) - 1)
-        self.cfg["env"]["numActions"] = 8
+        self.cfg["env"]["numObservations"] = 40 + 35 * (self.cfg["env"].get("numAgents", 1) - 1)
+        self.cfg["env"]["numActions"] = 12
         self.borderline_space = cfg["env"]["borderlineSpace"]
         print("===borderline_space===: ", self.borderline_space)
         self.borderline_space_unit = self.borderline_space / self.max_episode_length
@@ -65,7 +65,7 @@ class MA_Ant_Battle(MA_VecTask):
         print(f'dof_state_tensor:{dof_state_tensor.shape}')
         print(f'sensor_tensor:{sensor_tensor.shape}')
 
-        sensors_per_env = 4
+        sensors_per_env = 6
         self.vec_sensor_tensor = gymtorch.wrap_tensor(sensor_tensor).view(self.num_envs,
                                                                           sensors_per_env * 6)
         print(f'vec_sensor_tensor:{self.vec_sensor_tensor.shape}')
@@ -149,8 +149,7 @@ class MA_Ant_Battle(MA_VecTask):
     def _add_circle_borderline(self, env, radius):
         lines = self.lines * radius
         colors = np.array([[1, 0, 0]] * (len(lines) // 2), dtype=np.float32)
-        self.gym.add_lines(self.viewer, env, len(lines) // 2, lines, colors) 
-        # gymapi的官方方法，目的是把线渲染到viewer里，参数的意义文档里有
+        self.gym.add_lines(self.viewer, env, len(lines) // 2, lines, colors)
 
     def _create_ground_plane(self):
         plane_params = gymapi.PlaneParams()
@@ -164,7 +163,7 @@ class MA_Ant_Battle(MA_VecTask):
         upper = gymapi.Vec3(spacing, spacing, spacing)
 
         asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../assets')
-        asset_file = "mjcf/nv_ant.xml"
+        asset_file = "mjcf/temp.xml"
 
         if "asset" in self.cfg["env"]:
             asset_file = self.cfg["env"]["asset"].get("assetFileName", asset_file)
@@ -347,7 +346,6 @@ class MA_Ant_Battle(MA_VecTask):
         for agent_idx in range(self.num_agents):
             self.actions = torch.cat((self.actions, actions[agent_idx * self.num_envs:(agent_idx + 1) * self.num_envs]),
                                      dim=-1)
-            
         tmp_actions = self.extras['ranks'].unsqueeze(-1).repeat_interleave(self.num_actions, dim=-1).view(self.num_envs,
                                                                                                           self.num_actions * self.num_agents)
         zero_actions = torch.zeros_like(tmp_actions, dtype=torch.float)
@@ -356,7 +354,6 @@ class MA_Ant_Battle(MA_VecTask):
         # reshape [num_envs * num_agents, num_actions] to [num_envs, num_agents * num_actions] print(f'action_size{
 
         targets = self.actions
-        # print("targets.shape", targets.shape)
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
@@ -489,7 +486,7 @@ def compute_ant_observations(
         agent_idx,
 ):
     # type: (List[Tuple[Tensor,Tensor,Tensor]],Tensor,Tensor,Tensor,float,float,float,float,int,int)->Tensor
-    # tot length:13+8+8+1+1+1+(num_agents-1)*(7+2+8+8+1+1)
+    # tot length:13+12+12+1+1+1+(num_agents-1)*(7+2+12+12+1+1)
     self_root_state, self_dof_pos, self_dof_vel = ant_agents_state[agent_idx]
     dof_pos_scaled = unscale(self_dof_pos, dof_limits_lower, dof_limits_upper)
     now_border_space = (borderline_space - progress_buf * borderline_space_unit).unsqueeze(-1)

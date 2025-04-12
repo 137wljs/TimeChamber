@@ -91,6 +91,7 @@ class VA_VecTask(VA_Env):
 
         # create envs, sim and viewer
         self.sim_initialized = False
+        # breakpoint()
         self.create_sim()
         self.gym.prepare_sim(self.sim)
         self.sim_initialized = True
@@ -186,6 +187,7 @@ class VA_VecTask(VA_Env):
         Returns:
             the Isaac Gym sim object.
         """
+        # breakpoint()
         sim = self.gym.create_sim(compute_device, graphics_device, physics_engine, sim_params)
         if sim is None:
             print("*** Failed to create sim")

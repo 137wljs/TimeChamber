@@ -1,5 +1,13 @@
-import sys
-print(f"根目录是: {sys.path}")
+# import sys
+# import os
+
+# # 获取当前文件所在目录，并计算出项目根目录的绝对路径
+# current_dir = os.path.dirname(os.path.abspath(__file__))
+# project_root = os.path.dirname(current_dir)
+
+# # 将项目根目录添加到sys.path
+# if project_root not in sys.path:
+#     sys.path.append(project_root)  # 有点怪为什么还要加开头这段
 # train.py
 # Script to train policies in Isaac Gym
 #
@@ -58,7 +66,6 @@ from timechamber.learning import hrl_sp_player
 from timechamber.learning import vectorized_models
 from timechamber.learning import vectorized_network_builder
 from timechamber.learning.lib.agent.a2c_continuous import A2CAgent
-from timechamber.learning.lib.agent.players import A2CPlayer
 import timechamber
 
 
@@ -156,7 +163,6 @@ def launch_rlg_hydra(cfg: DictConfig):
 
         runner.player_factory.register_builder('self_play_continuous',
                                                lambda **kwargs: ppo_sp_player.SPPlayer(**kwargs))
-        runner.player_factory.register_builder('va_a2c', lambda **kwargs: A2CPlayer(**kwargs))
         runner.player_factory.register_builder('self_play_hrl',
                                                lambda **kwargs: hrl_sp_player.HRLSPPlayer(**kwargs))
         # runner.

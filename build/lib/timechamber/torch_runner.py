@@ -98,7 +98,6 @@ class Runner:
         print('Started to train')
         print(self.params)
         print(self.algo_name)
-        # breakpoint()
         agent = self.algo_factory.create(self.algo_name, base_name='run', params=self.params)
         if hasattr(agent, 'model1'):
             print(agent.model1)

@@ -9,6 +9,7 @@ import traceback
 from timechamber.utils.torch_jit_utils import *
 from .base.va_vec_task import VA_VecTask
 
+# 赋值reward和obs需要对所有环境的第一个智能体赋值，而不是赋值完一个环境的所有智能体再赋值下一个
 
 class MA_Ant_Bug_Battle(VA_VecTask):
 
@@ -29,10 +30,10 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.dof_vel_scale = self.cfg["env"]["dofVelocityScale"]
         self.ant_agents_state = []
         self.bug_agents_state = []
-        self.win_reward_scale = 1000
+        self.win_reward_scale = 2000
         self.move_to_op_reward_scale = 1.
-        self.stay_in_center_reward_scale = 20
-        self.action_cost_scale = -0.0025
+        self.stay_in_center_reward_scale = 0.2
+        self.action_cost_scale = -0.000025
         self.push_scale = 1.
         self.dense_reward_scale = 1.0
         self.hp_decay_scale = 1.
@@ -40,15 +41,14 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.Kd = self.cfg["env"]["control"]["damping"]
         self.cfg["env"]["numObservations1"] = 32 + 27 * (self.cfg["env"].get("numAgents1", 1) - 1) + 35 * (self.cfg["env"].get("numAgents2", 1))  # 1 for ant, 2 for bug
         self.cfg["env"]["numObservations2"] = 40 + 27 * (self.cfg["env"].get("numAgents1", 1)) + 35 * (self.cfg["env"].get("numAgents2", 1) - 1)  # 1 for ant, 2 for bug
-        # self.cfg["env"]["numObservations1"] = 32
-        # self.cfg["env"]["numObservations2"] = 40
         self.cfg["env"]["numActions1"] = 8
         self.cfg["env"]["numActions2"] = 12
         self.ant_dof_cnt = 8
         self.bug_dof_cnt = 12
         self.num_dof = self.ant_dof_cnt + self.bug_dof_cnt
-        self.borderline_space = cfg["env"]["borderlineSpace"]
-        self.borderline_space_unit = self.borderline_space / self.max_episode_length
+        # self.borderline_space = cfg["env"]["borderlineSpace"]
+        self.stretch_factor = cfg["env"]["stretch_factor"]
+        self.borderline_space_unit = self.borderline_space / self.max_episode_length 这里也得处理一下
         self.ant_body_colors = [gymapi.Vec3(*rgb_arr) for rgb_arr in self.cfg["env"]["color"]]
         self.bug_body_colors = [gymapi.Vec3(*rgb_arr) for rgb_arr in self.cfg["env"]["color"]]
         super().__init__(config=self.cfg, sim_device=sim_device, rl_device=rl_device,
@@ -60,7 +60,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.obs_idxs = torch.eye(4, dtype=torch.float32, device=self.device)
         if self.viewer is not None:
             for i, env in enumerate(self.envs):
-                self._add_circle_borderline(env, self.borderline_space)
+                # self._add_circle_borderline(env, self.borderline_space)
+                self._add_parallel_borderline(env, self.stretch_factor)
             cam_pos = gymapi.Vec3(15.0, 0.0, 3.4)
             cam_target = gymapi.Vec3(10.0, 0.0, 0.0)
             self.gym.viewer_camera_look_at(self.viewer, None, cam_pos, cam_target)
@@ -146,21 +147,36 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                        'lose': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
                                            dtype=torch.bool),
                        'draw': torch.zeros((self.num_envs * self.num_agents,), device=self.device,
-                                           dtype=torch.bool),
-                       'out': torch.zeros((self.num_envs, self.num_agents,), device=self.device, dtype=torch.bool),
-                    }
+                                           dtype=torch.bool)}
 
     def create_sim(self):
         self.up_axis_idx = self.set_sim_params_up_axis(self.sim_params, 'z')
         self.sim = super().create_sim(self.device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
+        # lines = []
+        # borderline_height = 0.01
+        # for height in range(20):
+        #     for angle in range(360):
+        #         begin_point = [np.cos(np.radians(angle)), np.sin(np.radians(angle)), borderline_height * height]
+        #         end_point = [np.cos(np.radians(angle + 1)), np.sin(np.radians(angle + 1)), borderline_height * height]
+        #         lines.append(begin_point)
+        #         lines.append(end_point)
+        # self.lines = np.array(lines, dtype=np.float32) 
+        # 高度为1-20，同一高度的一圈中遍历1-360度，对每一度，取当前度的(x,y,z)坐标和+1度的(x,y,z)坐标,lines是包含多个(x,y,z)类型元素的列表
         lines = []
-        borderline_height = 0.01
+        line_length = 15.0  # 线的长度
+        line_distance = 10.0  # 两条线之间的距离
+        borderline_height = 0.01  # 每次循环的高度步长
         for height in range(20):
-            for angle in range(360):
-                begin_point = [np.cos(np.radians(angle)), np.sin(np.radians(angle)), borderline_height * height]
-                end_point = [np.cos(np.radians(angle + 1)), np.sin(np.radians(angle + 1)), borderline_height * height]
-                lines.append(begin_point)
-                lines.append(end_point)
+            # 绘制第一条线 y = 0
+            begin_point_1 = [0.0, 0.0, borderline_height * height]  
+            end_point_1 = [line_length, 0.0, borderline_height * height] 
+            # 绘制第二条线 y = line_distance
+            begin_point_2 = [0.0, line_distance, borderline_height * height]  
+            end_point_2 = [line_length, line_distance, borderline_height * height] 
+            lines.append(begin_point_1)
+            lines.append(end_point_1)
+            lines.append(begin_point_2)
+            lines.append(end_point_2) 
         self.lines = np.array(lines, dtype=np.float32)
         self._create_ground_plane()
         print(f'num envs {self.num_envs} env spacing {self.cfg["env"]["envSpacing"]}')
@@ -170,8 +186,14 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
 
-    def _add_circle_borderline(self, env, radius):
-        lines = self.lines * radius
+    # def _add_circle_borderline(self, env, radius):
+    #     lines = self.lines * radius  # 感觉这么算把高度也乘radius了
+    #     colors = np.array([[1, 0, 0]] * (len(lines) // 2), dtype=np.float32)
+    #     self.gym.add_lines(self.viewer, env, len(lines) // 2, lines, colors)
+    # gymapi的官方方法，目的是把线渲染到viewer里，参数的意义文档里有
+
+    def _add_parallel_borderline(self, env, stretch_factor):
+        lines = self.lines * stretch_factor  # 感觉这么算把高度也乘stretch_factor
         colors = np.array([[1, 0, 0]] * (len(lines) // 2), dtype=np.float32)
         self.gym.add_lines(self.viewer, env, len(lines) // 2, lines, colors)
 
@@ -267,7 +289,6 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             for agent_index in range(self.num_agents2):
                 self.gym.create_asset_force_sensor(bug_assets[0], body_idx, sensor_pose)
 
-       
 
         # self.ant_handles = []
         # self.actor_indices = []
@@ -378,7 +399,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
     def compute_reward(self, actions1, actions2):
 
         self.rew_buf[:], self.reset_buf[:], self.extras['ranks'][:], self.extras['win'], self.extras['lose'], \
-        self.extras['draw'], self.extras['out'] = compute_agent_reward(
+        self.extras[
+            'draw'] = compute_agent_reward(
             self.obs_buf1,
             self.obs_buf2,
             self.reset_buf,
@@ -441,6 +463,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                     agent_idx,
                 )
 
+    # 设定智能体初始位置
     def reset_idx(self, env_ids):
         # print('reset.....', env_ids)
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
@@ -489,6 +512,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.reset_buf[env_ids] = 0
         self.extras['ranks'][env_ids] = 0
 
+    # 智能体做出一个动作对环境的影响
     def pre_physics_step(self, actions1, actions2):                                                                    # ??
         # actions.shape = [num_envs * num_agents, num_actions], stacked as followed:
         # {[(agent1_act_1, agent1_act2)|(agent2_act1, agent2_act2)|...]_(env0),
@@ -520,8 +544,9 @@ class MA_Ant_Bug_Battle(VA_VecTask):
 
         self.gym.set_dof_position_target_tensor(self.sim, gymtorch.unwrap_tensor(targets))
 
+    # 智能体做出一个动作之后环境的其他影响
     def post_physics_step(self):
-        self.progress_buf += 1
+        self.progress_buf += 1  # 时间步++，类似与1秒 2秒 3秒 计时的感觉
         self.randomize_buf += 1
 
         resets = self.reset_buf.reshape(self.num_envs, 1).sum(dim=1)
@@ -529,7 +554,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         env_ids = (resets == 1).nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
-    
+
         self.compute_observations()
         self.compute_reward(self.actions1, self.actions2)
 
@@ -538,6 +563,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             for i, env in enumerate(self.envs):
                 self._add_circle_borderline(env, self.borderline_space - self.borderline_space_unit * self.progress_buf[
                     i].item())
+                这里还得改改
 
     def get_number_of_agents(self):
         # only train 2 agent
@@ -585,7 +611,7 @@ def expand_env_ids(env_ids, n_agents):
         agent_env_ids[idx::n_agents] = env_ids * n_agents + idx
     return agent_env_ids
 
-
+# 计算reward 通过reward调整智能体是竞争关系还是合作关系
 @torch.jit.script
 def compute_agent_reward(
         obs_buf1,
@@ -608,7 +634,7 @@ def compute_agent_reward(
         num_agents1,
         num_agents2
 ):
-    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor]
     # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
     obs1 = obs_buf1.view(num_agents1, -1, obs_buf1.shape[1])
     obs2 = obs_buf2.view(num_agents2, -1, obs_buf2.shape[1])
@@ -634,30 +660,14 @@ def compute_agent_reward(
     wins = torch.where(is_out, wins & (tmp_reset == 1), tmp_zeros) # (num_agents, num_envs)
     draws = torch.where(is_out == 0, draws & (tmp_reset == 1), tmp_zeros)
     loses = torch.where(is_out == 0, loses & (tmp_reset == 1) & (draws == 0), tmp_zeros)
-    # print("===s=====")
-    # print(f"shape: {tmp_reset.shape}")
-    # print(tmp_reset)
-    # print(f"shape: {reset.shape}")
-    # print(reset)
-    # print("===e=====")
 
     sparse_reward = 1.0 * reset.unsqueeze(-1)
-    reward_per_rank = win_reward_scale / (num_agents1 + num_agents2)
+    reward_per_rank = 2 * win_reward_scale / (num_agents1 + num_agents2)
     sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
     ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1))
     bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[:, :, :2], dim=-1))
-    
-    print("===s=====")
-    print(f"shape: {torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)).shape}")
-    print(torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)))
-    print(f"shape: {torch.linalg.norm(obs1[:, :, :2], dim=-1).shape}")
-    print(torch.linalg.norm(obs1[:, :, :2], dim=-1))
-    print(f"shape: {obs1[:, :, :2].shape}")
-    print(obs1[:, :, :2])
-    print("===e=====")
-
     ant_dof_at_limit_cost = torch.sum(obs1[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
-    bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:25] > 0.99, dim=-1) * joints_at_limit_cost_scale
+    bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
     ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1) * action_cost_scale
     bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1) * action_cost_scale
     # print("torques:", torques[0, 2])
@@ -667,24 +677,12 @@ def compute_agent_reward(
     # print(f'action:...{action_cost_penalty.shape}')
     ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)
     bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1)
-    # ant_dense_reward = ant_stay_in_center_reward.transpose(0, 1)
-    # bug_dense_reward = bug_stay_in_center_reward.transpose(0, 1)
-    # print(f"ant_dof_at_limit_cost:{ant_dof_at_limit_cost.transpose(0,1)}")
-    # print(f"bug_dof_at_limit_cost:{bug_dof_at_limit_cost.transpose(0,1)}")
-    # print(f"ant_action_cost_penalty:{ant_action_cost_penalty}")
-    # print(f"bug_action_cost_penalty:{bug_action_cost_penalty}")
-    # print(f"ant_not_move_penalty:{ant_not_move_penalty}")
-    # print(f"bug_not_move_penalty:{bug_not_move_penalty}")
-    # print(f"ant_stay_in_center_reward:{ant_stay_in_center_reward.transpose(0,1)}")
-    # print(f"bug_stay_in_center_reward:{bug_stay_in_center_reward.transpose(0,1)}")
-    # print(f"sparse_reward:{sparse_reward}")
-    total_reward = torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
-    # print(f"out_info:{is_out}")
+    total_reward = sparse_reward + torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
     # print('total_reward.shape:', total_reward.shape)
 
-    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out
+    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten()
 
-
+# 计算obs 
 @torch.jit.script
 def compute_agent_observations(
         ant_agents_state,
@@ -735,6 +733,7 @@ def compute_agent_observations(
                          dof_pos_scaled, op_dof_vel * dof_vel_scale,
                          now_border_space - torch.sqrt(torch.sum(op_root_state[:, :2].square(), dim=-1)).unsqueeze(-1),
                          torch.unsqueeze(op_root_state[:, 2] < termination_height, -1)), dim=-1)
+    # print(obs.shape)
     return obs
 
 

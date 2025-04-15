@@ -401,7 +401,8 @@ class ContinuousA2CBase(A2CBase):
                     if self.save_freq > 0:
                         if epoch_num % self.save_freq == 0:
                             self.save(os.path.join(self.nn_dir, 'last_' + checkpoint_name))
-
+                    print("mean_reward_ant: " , mean_rewards1[0])
+                    print("mean_reward_bug: " , mean_rewards2[0])
                     if mean_rewards1[0] + mean_rewards2[0] > self.last_mean_rewards1 + self.last_mean_rewards2 and epoch_num >= self.save_best_after:
                         print('saving next best rewards: ', mean_rewards1, mean_rewards2)
                         self.last_mean_rewards1 = mean_rewards1[0]

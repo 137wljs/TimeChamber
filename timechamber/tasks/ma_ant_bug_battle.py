@@ -644,8 +644,8 @@ def compute_agent_reward(
     ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1) * action_cost_scale
     bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1) * action_cost_scale
     # print("torques:", torques[0, 2])
-    ant_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1))
-    bug_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1))
+    ant_not_move_penalty = -torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1))
+    bug_not_move_penalty = -torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1))
     # print("shape used in the below two lines:", ant_dof_at_limit_cost.shape, ant_action_cost_penalty.shape, ant_not_move_penalty.shape, ant_stay_in_center_reward.shape)
     # print(f'action:...{action_cost_penalty.shape}')
     ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)

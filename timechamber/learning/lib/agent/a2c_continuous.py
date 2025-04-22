@@ -9,6 +9,7 @@ import numpy as np
 import time
 from torch import optim
 import torch.distributed as dist
+import matplotlib.pyplot as plt
 
 def rescale_actions(low, high, action):
     d = (high - low) / 2.0
@@ -44,6 +45,11 @@ class ContinuousA2CBase(A2CBase):
         self.bounds_loss_coef1 = self.config.get('bounds_loss_coef', None)
         self.bounds_loss_coef2 = self.config.get('bounds_loss_coef', None)
         self.clip_actions = self.config.get('clip_actions', True)
+        self.games_cnt = 0
+        self.weak_wins_cnt = 0
+        self.epoch_weak_win_rate_list = []
+        self.mean_reward1_list = []
+        self.mean_reward2_list = []
 
         # todo introduce device instead of cuda()
         self.actions_low1 = torch.from_numpy(action_space[0].low.copy()).float().to(self.ppo_device)
@@ -111,6 +117,14 @@ class ContinuousA2CBase(A2CBase):
             batch_dict1, batch_dict2 = self.play_steps()
         play_time_end = time.time()
         update_time_start = time.time()
+        now_games_cnt = self.vec_env.env.task.games_cnt
+        now_weak_wins_cnt = self.vec_env.env.task.weak_wins_cnt
+        epoch_ngames = now_games_cnt - self.games_cnt
+        epoch_nweak_wins = now_weak_wins_cnt - self.weak_wins_cnt
+        self.games_cnt = now_games_cnt
+        self.weak_wins_cnt = now_weak_wins_cnt
+        self.epoch_weak_win_rate_list.append(epoch_nweak_wins / epoch_ngames)
+        print(f"current ant win rate: {epoch_nweak_wins / epoch_ngames:.2f}")
 
         self.set_train()
         self.curr_frames1 = batch_dict1.pop('played_frames')
@@ -403,6 +417,8 @@ class ContinuousA2CBase(A2CBase):
                             self.save(os.path.join(self.nn_dir, 'last_' + checkpoint_name))
                     print("mean_reward_ant: " , mean_rewards1[0])
                     print("mean_reward_bug: " , mean_rewards2[0])
+                    self.mean_reward1_list.append(mean_rewards1[0])
+                    self.mean_reward2_list.append(mean_rewards2[0])
                     if mean_rewards1[0] + mean_rewards2[0] > self.last_mean_rewards1 + self.last_mean_rewards2 and epoch_num >= self.save_best_after:
                         print('saving next best rewards: ', mean_rewards1, mean_rewards2)
                         self.last_mean_rewards1 = mean_rewards1[0]
@@ -423,6 +439,24 @@ class ContinuousA2CBase(A2CBase):
                     self.save(os.path.join(self.nn_dir, 'last_' + self.config['name'] + '_ep_' + str(epoch_num) \
                         + '_rew1_' + str(mean_rewards1[0]) + '_rew2_' + str(mean_rewards2[0]).replace('[', '_').replace(']', '_')))
                     print('MAX EPOCHS NUM!')
+                    # use matplotlib to print mean_rewards1 and mean_rewards2 on one plot
+                    x_axis = np.arange(len(self.mean_reward1_list))
+                    plt.plot(x_axis, self.mean_reward1_list, label='ant_reward')
+                    plt.plot(x_axis, self.mean_reward2_list, label='bug_reward')
+                    plt.xlabel('Epochs')
+                    plt.ylabel('Mean Rewards')
+                    plt.title('Rewards over training time')
+                    plt.legend()
+                    plt.savefig(os.path.join(self.nn_dir, 'mean_rewards.png'))
+                    plt.close()
+                    # print epoch_weak_win_rate_list
+                    x_axis = np.arange(len(self.epoch_weak_win_rate_list))
+                    plt.plot(x_axis, self.epoch_weak_win_rate_list)
+                    plt.xlabel('Epochs')
+                    plt.ylabel('Ant Win Rate')
+                    plt.title('Ant Win Rate over training time')
+                    plt.savefig(os.path.join(self.nn_dir, 'ant_win_rate.png'))
+                    plt.close()
                     should_exit = True
 
                 if self.frame >= self.max_frames and self.max_frames != -1:

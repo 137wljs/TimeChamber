@@ -51,6 +51,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.borderline_space_unit = self.borderline_space / self.max_episode_length
         self.ant_body_colors = [gymapi.Vec3(*rgb_arr) for rgb_arr in self.cfg["env"]["color"]]
         self.bug_body_colors = [gymapi.Vec3(*rgb_arr) for rgb_arr in self.cfg["env"]["color"]]
+        self.games_cnt = 0
+        self.weak_wins_cnt = 0
         super().__init__(config=self.cfg, sim_device=sim_device, rl_device=rl_device,
                          graphics_device_id=graphics_device_id,
                          headless=headless, virtual_screen_capture=virtual_screen_capture,
@@ -377,7 +379,7 @@ class MA_Ant_Bug_Battle(VA_VecTask):
     def compute_reward(self, actions1, actions2):
 
         self.rew_buf[:], self.reset_buf[:], self.extras['ranks'][:], self.extras['win'], self.extras['lose'], \
-        self.extras['draw'], self.extras['out'] = compute_agent_reward(
+        self.extras['draw'], self.extras['out'], game_inc, ant_wins_inc = compute_agent_reward(
             self.obs_buf1,
             self.obs_buf2,
             self.reset_buf,
@@ -398,6 +400,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             self.num_agents1,
             self.num_agents2
         )
+        self.games_cnt += game_inc
+        self.weak_wins_cnt += ant_wins_inc
 
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -439,6 +443,9 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                     self.num_agents2,
                     agent_idx,
                 )
+                
+    def game_sit(self):
+        return self.games_cnt, self.ant_wins_cnt
 
     def reset_idx(self, env_ids):
         # print('reset.....', env_ids)
@@ -607,19 +614,22 @@ def compute_agent_reward(
         num_agents1,
         num_agents2
 ):
-    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor, Tensor]
+    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor, Tensor, int, int]
     # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
     obs1 = obs_buf1.view(num_agents1, -1, obs_buf1.shape[1])
     obs2 = obs_buf2.view(num_agents2, -1, obs_buf2.shape[1])
     nxt_rank_val = num_agents1 + num_agents2 - torch.count_nonzero(now_rank, dim=-1).view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
     is_out = torch.sum(torch.square(torch.cat((obs1[:, :, 0:2], obs2[:, :, 0:2]), dim=0)), dim=-1) >= \
              (borderline_space - progress_buf * borderline_space_unit).square()
+    bug_dist_to_border = torch.sqrt(torch.abs((borderline_space - progress_buf * borderline_space_unit).square() - torch.sum(torch.square(obs2[:, :, 0:2]), dim=-1)))
+    dist_scale = 10
     nxt_rank = torch.where((torch.transpose(is_out, 0, 1) > 0) & (now_rank == 0), nxt_rank_val, now_rank)
     # reset agents
     tmp_ones = torch.ones_like(reset_buf)
     reset = torch.where(torch.min(is_out[:num_agents1], dim=0).values, tmp_ones, reset_buf)
     reset = torch.where(progress_buf >= max_episode_length - 1, tmp_ones, reset)
     reset = torch.where(torch.min(is_out[num_agents1:], dim=0).values, tmp_ones, reset)
+    over_games_cnt = torch.sum(reset)
     tmp_reset = reset.view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
     nxt_rank = torch.where((tmp_reset == 1) & (nxt_rank == 0),
                            nxt_rank_val - 1,
@@ -627,16 +637,19 @@ def compute_agent_reward(
     # compute metric logic
     tmp_reset = reset.view(1, -1).repeat_interleave(num_agents1 + num_agents2, dim=0)
     tmp_zeros = torch.zeros_like(is_out, dtype=torch.bool)
+    tmp_ones = torch.ones_like(is_out, dtype=torch.bool)
     wins = torch.ones_like(is_out, dtype=torch.bool)
     loses = torch.ones_like(wins, dtype=torch.bool)
     draws = (progress_buf >= max_episode_length - 1).view(1, -1).repeat_interleave(num_agents1 + num_agents2, dim=0)
+    tmp_loses = torch.where(is_out, tmp_ones, tmp_zeros)
+    over_ant_wins_cnt = torch.sum(tmp_loses[num_agents1:])
     wins = torch.where(is_out, wins & (tmp_reset == 1), tmp_zeros) # (num_agents, num_envs)
     draws = torch.where(is_out == 0, draws & (tmp_reset == 1), tmp_zeros)
     loses = torch.where(is_out == 0, loses & (tmp_reset == 1) & (draws == 0), tmp_zeros)
 
     sparse_reward = 1.0 * reset.unsqueeze(-1)
     reward_per_rank = win_reward_scale / (num_agents1 + num_agents2)
-    sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
+    sparse_reward = sparse_reward * (win_reward_scale  - (nxt_rank - 1) * reward_per_rank)
     ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1))
     bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[:, :, :2], dim=-1))
     ant_dof_at_limit_cost = torch.sum(obs1[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
@@ -646,10 +659,22 @@ def compute_agent_reward(
     # print("torques:", torques[0, 2])
     ant_not_move_penalty = -torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1))
     bug_not_move_penalty = -torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1))
+    push_bug_to_border_reward = dist_scale * torch.exp(-bug_dist_to_border.transpose(0, 1))
+    ant_root_orientations = obs1[:, :, 3:7]
+    ant_w, ant_x, ant_y, ant_z = ant_root_orientations[:, :, 0], ant_root_orientations[:, :, 1], ant_root_orientations[:, :, 2], ant_root_orientations[:, :, 3] # 四元数
+    ant_yaw = torch.atan2(2 * (ant_w * ant_z + ant_x * ant_y), 1 - 2 * (torch.square(ant_y) + torch.square(ant_z))) # 欧拉角绕z轴旋转的角度
+    ant_is_flipped = torch.abs(ant_yaw) < torch.pi / 4 
+    bug_root_orientations = obs2[:, :, 3:7]
+    bug_w, bug_x, bug_y, bug_z = bug_root_orientations[:, :, 0], bug_root_orientations[:, :, 1], bug_root_orientations[:, :, 2], bug_root_orientations[:, :, 3] # 四元数
+    bug_yaw = torch.atan2(2 * (bug_w * bug_z + bug_x * bug_y), 1 - 2 * (torch.square(bug_y) + torch.square(bug_z))) # 欧拉角绕z轴旋转的角度
+    bug_is_flipped = torch.abs(bug_yaw) < torch.pi / 4
+    flip_scale = -10
+    ant_flip_penalty = flip_scale * ant_is_flipped
+    bug_flip_penalty = flip_scale * bug_is_flipped
     # print("shape used in the below two lines:", ant_dof_at_limit_cost.shape, ant_action_cost_penalty.shape, ant_not_move_penalty.shape, ant_stay_in_center_reward.shape)
     # print(f'action:...{action_cost_penalty.shape}')
-    ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)
-    bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1)
+    ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1) + ant_flip_penalty.transpose(0, 1)
+    bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1) + bug_flip_penalty.transpose(0, 1)
     # ant_dense_reward = ant_stay_in_center_reward.transpose(0, 1)
     # bug_dense_reward = bug_stay_in_center_reward.transpose(0, 1)
     # print(f"ant_dof_at_limit_cost:{ant_dof_at_limit_cost.transpose(0,1)}")
@@ -660,12 +685,21 @@ def compute_agent_reward(
     # print(f"bug_not_move_penalty:{bug_not_move_penalty}")
     # print(f"ant_stay_in_center_reward:{ant_stay_in_center_reward.transpose(0,1)}")
     # print(f"bug_stay_in_center_reward:{bug_stay_in_center_reward.transpose(0,1)}")
+    # print(f"ant_flip_penalty:{ant_flip_penalty.transpose(0,1)}")
+    # print(f"bug_flip_penalty:{bug_flip_penalty.transpose(0,1)}")
     # print(f"sparse_reward:{sparse_reward}")
-    total_reward = torch.cat([ant_dense_reward * dense_reward_scale, bug_dense_reward * dense_reward_scale], dim=1)
+    ant_dense_reward = ant_dense_reward * dense_reward_scale
+    bug_dense_reward = bug_dense_reward * dense_reward_scale
+    cooperate_scale = 0
+    combat_scale = 0.1
+    # ant_dense_reward = ant_dense_reward * (1 - cooperate_scale) + (torch.sum(ant_dense_reward, dim=1, keepdim=True)) * cooperate_scale + torch.sum(push_bug_to_border_reward, dim=1, keepdim=True)
+    ant_dense_reward = ant_dense_reward * (1 - cooperate_scale) + (torch.sum(ant_dense_reward, dim=1, keepdim=True)) * cooperate_scale
+    bug_dense_reward = bug_dense_reward * (1 - cooperate_scale) + (torch.sum(bug_dense_reward, dim=1, keepdim=True)) * cooperate_scale
+    total_reward = torch.cat([ant_dense_reward, bug_dense_reward], dim=1)
     # print(f"out_info:{is_out}")
     # print('total_reward.shape:', total_reward.shape)
 
-    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out
+    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out, over_games_cnt, over_ant_wins_cnt
 
 
 @torch.jit.script

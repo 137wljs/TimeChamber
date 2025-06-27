@@ -41,7 +41,9 @@ class ModelA2CContinuousLogStd(BaseModel):
         out_size = self.mlp_cfg['units'][-1]
         self.mu = nn.Linear(out_size, actions_num)
         self.mu_act = nn.Identity()
-        self.mu.weight.data.mul_(0.1)
+        self.mu.weight.data.mul_(0.1) # obs变成64维后，经过该(64,action_space)的线性层时，该线性层权重被乘以0.1,导致mu = W*obs + b 接近0
+        # self.mu.weight.data.mul_(1.0) # 动作值mu太接近0,并且gamma也小，因此动作非常接近mu 0,导致动作力矩也接近0,所以看起来不动 
+        # 也不对mu=0只能反映动作角度，如果看起来不动是因为mu变化比较小，而且也需要*0.1让动作进入(-1,1)的范围
         self.mu.bias.data.mul_(0.0)
         
         if self.fixed_sigma:
@@ -119,6 +121,10 @@ class ModelA2CContinuousLogStd(BaseModel):
                 logstd = self.logstd_act(self.logstd(a_out))
             value = self.value_head_act(self.value_head(c_out))
 
+            # print("mu value:", mu.detach().cpu().numpy())
+            # print("mu weight:", self.mu.weight.detach().cpu().numpy())
+            # print("mu bias:", self.mu.bias.detach().cpu().numpy())
+
         else:
             if self.has_resnet:
                 normed_image = self.norm_image(input_dict['obs']['image'])
@@ -158,13 +164,14 @@ class ModelA2CContinuousLogStd(BaseModel):
                 'mus' : mu,
                 'sigmas' : sigma
             }
+            
             return result
         else:
             selected_action = distr.sample()
             neglogp = self.neglogp(selected_action, mu, sigma, logstd)
             result = {
                 'neglogpacs' : torch.squeeze(neglogp),
-                'values' : self.denorm_value(value),
+                'values' : self.denorm_value(value), # 反归一化，使用critic网络得到的真实的value值
                 'actions' : selected_action,
                 'mus' : mu,
                 'sigmas' : sigma

@@ -104,6 +104,9 @@ class VA_Env(ABC):
 
         self.control_freq_inv = config["env"].get("controlFrequencyInv", 1)
 
+        # self.obs_space = spaces.Box(np.ones(self.num_obs) * -np.Inf, np.ones(self.num_obs) * np.Inf)
+        # self.state_space = spaces.Box(np.ones(self.num_states) * -np.Inf, np.ones(self.num_states) * np.Inf)
+        # 改成针对多智能体的obs和state,box定义了向量的维度，维度中值的上限和下限
         self.obs_space = (spaces.Box(np.ones(self.num_observations1) * -np.Inf, np.ones(self.num_observations1) * np.Inf), spaces.Box(np.ones(self.num_observations2) * -np.Inf, np.ones(self.num_observations2) * np.Inf))
         self.state_space = (spaces.Box(np.ones(self.num_states1) * -np.Inf, np.ones(self.num_states1) * np.Inf), spaces.Box(np.ones(self.num_states2) * -np.Inf, np.ones(self.num_states2) * np.Inf))
 

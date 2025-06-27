@@ -121,6 +121,8 @@ class BasePlayer(object):
             action1 = action1.cpu().numpy()
             action2 = action2.cpu().numpy()
         obs, rewards, dones, infos = env.step(action1, action2)
+        # print(rewards)
+        # rewards维度是二维，第一维度维数是num_envs,第二维度维数是num_agents，元素是这个step该环境该智能体获得的reward
         if hasattr(obs, 'dtype') and obs.dtype == np.float64:
             obs = np.float32(obs)
         if self.value_size > 1:
@@ -211,6 +213,7 @@ class BasePlayer(object):
         raise NotImplementedError('raise')
 
     def run(self):
+        print("==============看看你的？？？？？？？？？===========")
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
@@ -258,6 +261,7 @@ class BasePlayer(object):
 
                 obses, r, done, info = self.env_step(self.env, action1, action2)
                 r1 = r[:, :self.num_agents1].reshape(-1)
+                # print(r1)
                 r2 = r[:, self.num_agents1:].reshape(-1)
                 # print("r1.shape",r1.shape)
                 cr1 += r1
@@ -280,6 +284,7 @@ class BasePlayer(object):
                 games_played += len(done.nonzero(as_tuple=False))
 
                 if done_count1 > 0 or done_count2 > 0:
+                    # print(done_indices1)
                     cur_rewards1 = cr1[done_indices1].sum().item()
                     cur_rewards2 = cr2[done_indices2].sum().item()
                     cur_steps1 = steps1[done_indices1].sum().item()
@@ -296,7 +301,7 @@ class BasePlayer(object):
 
                     game_res = 0.0
                     if isinstance(info, dict):                          # useless?
-                        if 'battle_won' in info:                    
+                        if 'battle_won' in info:             
                             print_game_res = True
                             game_res = info.get('battle_won', 0.5)
                         if 'scores' in info:
@@ -406,6 +411,9 @@ class A2CPlayer(BasePlayer):
         if self.has_batch_dimension == False:
             current_action = torch.squeeze(current_action.detach())
         
+        # print("mu value:", mu.detach().cpu().numpy())
+        # print("selected action:", current_action.detach().cpu().numpy())
+
         if self.clip_actions:
             return rescale_actions(self.actions_low1, self.actions_high1, torch.clamp(current_action, -1.0, 1.0))
         else:
@@ -431,8 +439,18 @@ class A2CPlayer(BasePlayer):
         if self.has_batch_dimension == False:
             current_action = torch.squeeze(current_action.detach())
         
+        # print("mu value:", mu.detach().cpu().numpy())
+        # print("selected action:", current_action.detach().cpu().numpy())
+        # print("||||||||||||||||||")
+
+        # print("action space bounds - low:", self.actions_low2.cpu().numpy())
+        # print("action space bounds - high:", self.actions_high2.cpu().numpy())
+        # current_action = torch.tensor([0, -1, 0, 1, 0, -1, 0, 1, 0, -1, 0, 1], device=self.device)
+        
+        
         if self.clip_actions:
             return rescale_actions(self.actions_low2, self.actions_high2, torch.clamp(current_action, -1.0, 1.0))
+            # return rescale_actions(self.actions_low2, self.actions_high2, torch.clamp(current_action, -1.0, 1.0))
         else:
             return current_action
 
@@ -449,8 +467,20 @@ class A2CPlayer(BasePlayer):
     #         self.env.set_env_state(env_state)
 
     def restore(self, fn):
-        checkpoint = torch_ext.load_checkpoint(fn)
-        self.set_full_state_weights(checkpoint)
+        # checkpoint = torch_ext.load_checkpoint(fn)
+        # self.set_full_state_weights(checkpoint)
+        """
+        分别从指定文件夹下的ant.pth和bug.pth加载ant和bug的参数。
+        """
+        import os
+        from timechamber.learning.lib.core import torch_ext
+        ant_ckpt = torch_ext.load_checkpoint(os.path.join(fn, 'ant.pth'))
+        bug_ckpt = torch_ext.load_checkpoint(os.path.join(fn, 'bug.pth'))
+        # 合并为一个dict，兼容set_full_state_weights
+        merged = {}
+        merged['model1'] = ant_ckpt['model1']
+        merged['model2'] = bug_ckpt['model2']
+        self.set_full_state_weights(merged)
 
     def set_full_state_weights(self, checkpoint):
         weights = checkpoint
@@ -459,6 +489,10 @@ class A2CPlayer(BasePlayer):
         try:
             self.model1.load_state_dict(weights['model1'])
             self.model2.load_state_dict(weights['model2'])
+            print("||||||||||||||sigma值||||||||||||||||")
+            print("Model 1 logstd after loading:", self.model1.logstd.detach().cpu().numpy())
+            print("Model 1 sigma after loading:", torch.exp(self.model1.logstd).detach().cpu().numpy())
+            print("Model 2 sigma after loading:", torch.exp(self.model2.logstd).detach().cpu().numpy())
         except:
             """
             Load pretrained mlp.

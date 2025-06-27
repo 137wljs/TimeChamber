@@ -13,7 +13,7 @@ env:
   # rgb color of Ant body
   color: [ [ 0.97, 0.38, 0.06 ],[ 0.24, 0.38, 0.06 ],[ 0.56, 0.85, 0.25 ],[ 0.56, 0.85, 0.25 ],[ 0.14, 0.97, 0.24 ],[ 0.63, 0.2, 0.87 ] ]
   envSpacing: 6
-  borderlineSpace: 3
+  borderlineSpace: 4.5 # 原来是3 搞大点
   stretch_factor: 3  # 借用一下这个yaml文件 这个参数记得删除
   paralleline_space: 6.0 # 借用一下这个yaml文件 这个参数记得删除
   episodeLength: 1000
@@ -36,7 +36,8 @@ env:
   # cost parameters
   terminationHeight: 0.31
   dofVelocityScale: 0.2
-  jointsAtLimitCost: -0.1
+  # jointsAtLimitCost: -0.1
+  jointsAtLimitCost: -0. # 搞小点试试
 
   plane:
     staticFriction: 1.0

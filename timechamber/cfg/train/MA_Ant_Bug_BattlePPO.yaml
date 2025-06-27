@@ -61,8 +61,8 @@ params:
     kl_threshold: 0.008
     score_to_win: 20000
     max_epochs: ${resolve_default:2000,${....max_iterations}}
-    save_best_after: 200
-    save_frequency: 1000
+    save_best_after: 10 # 原200
+    save_frequency: 40  # 原1000
     grad_norm: 1.0
     entropy_coef: 0.0
     truncate_grads: True
@@ -75,6 +75,7 @@ params:
     use_smooth_clamp: True
     bounds_loss_coef: 0.0000
     player:
+      # deterministic: False # 测试中也使用采样的方式获得动作
       games_num: 4000
       record_elo: True
       init_elo: 400

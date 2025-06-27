@@ -168,6 +168,7 @@ class SPPlayer(BasePlayer):
                     players_sorted_by_rank[idx][1].rating = new_rating
 
     def run(self):
+        print("看看原来的")
         n_games = self.games_num
         render = self.render_env
         n_game_life = self.n_game_life
@@ -246,6 +247,7 @@ class SPPlayer(BasePlayer):
                             print_game_res = True
                             game_res = info.get('scores', 0.5)
                     if self.print_stats:
+                        print("我嘞个豆")
                         if print_game_res:
                             print('reward:', cur_rewards / done_count,
                                   'steps:', cur_steps / done_count, 'w:', game_res)

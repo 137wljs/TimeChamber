@@ -223,7 +223,7 @@ class VA_VecTask(VA_Env):
         if self.dr_randomizations.get('actions', None):                            # useless?
             actions = self.dr_randomizations['actions']['noise_lambda'](actions)
 
-        breakpoint()
+        
         # apply actions
         self.pre_physics_step(actions1, actions2)
 

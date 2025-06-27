@@ -95,11 +95,12 @@ class Runner:
         self.load_config(params=self.default_config)
 
     def run_train(self, args):
+        print("|||||||||||||||||||||||||||||||||||||||||")
         print('Started to train')
         print(self.params)
         print(self.algo_name)
-        # breakpoint()
         agent = self.algo_factory.create(self.algo_name, base_name='run', params=self.params)
+
         if hasattr(agent, 'model1'):
             print(agent.model1)
             print(agent.model2)
@@ -108,6 +109,7 @@ class Runner:
         print('=====created agent=====')
         _restore(agent, args)
         _override_sigma(agent, args)
+ 
         agent.train()
 
     def run_play(self, args):

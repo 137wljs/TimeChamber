@@ -9,11 +9,15 @@ import traceback
 from timechamber.utils.torch_jit_utils import *
 from .base.va_vec_task import VA_VecTask
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 class MA_Ant_Bug_Battle(VA_VecTask):
 
     def __init__(self, cfg, sim_device, rl_device, graphics_device_id, headless, virtual_screen_capture, force_render):
         
+        self.sum =0.
         self.extras = None
         self.cfg = cfg
         self.randomization_params = self.cfg["task"]["randomization_params"]
@@ -29,11 +33,19 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         self.dof_vel_scale = self.cfg["env"]["dofVelocityScale"]
         self.ant_agents_state = []
         self.bug_agents_state = []
-        self.win_reward_scale = 1000
+        # self.win_reward_scale = 1000
+        self.win_reward_scale = 10
         self.move_to_op_reward_scale = 1.
-        self.stay_in_center_reward_scale = 20
-        self.action_cost_scale = -0.0025
-        self.push_scale = 1.
+        # self.stay_in_center_reward_scale = 20
+        self.stay_in_center_reward_scale = 0.
+        # self.action_cost_scale = -0.000025
+        self.action_cost_scale = 0. # 先专注在位移上
+        self.flipped_scale = -0. # 翻倒惩罚 原来是10,先小点，主要别静止以及接近对手
+        self.move_scale = 10. # 位移奖励,在课程二：向对方位移时改为0,课程一：向圆心位移时为10
+        # self.tend_to_flip_scale = -1.
+        self.tend_to_flip_scale = -0. # 专注在不静止上
+        # self.push_scale = 1.
+        self.push_scale = 20. # 使劲推对方
         self.dense_reward_scale = 1.0
         self.hp_decay_scale = 1.
         self.Kp = self.cfg["env"]["control"]["stiffness"]
@@ -373,16 +385,26 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             self.bug_extremities_index[i] = self.gym.find_actor_rigid_body_handle(
                 self.envs[0], self.bug_handles[0], bug_extremity_names[i]
             )
+        
+        self.ant_wins = 0
+        self.bug_wins = 0
+        self.num_matches = 0
+        self.win_rate_data = []
 
 
     def compute_reward(self, actions1, actions2):
 
         self.rew_buf[:], self.reset_buf[:], self.extras['ranks'][:], self.extras['win'], self.extras['lose'], \
-        self.extras['draw'], self.extras['out'] = compute_agent_reward(
+        self.extras['draw'], self.extras['out'], bug, \
+        num_matches, ant_wins, bug_wins = compute_agent_reward(
             self.obs_buf1,
             self.obs_buf2,
             self.reset_buf,
             self.progress_buf,
+            self.last_step_pos,
+            self.last_step_min_distances_bug_to_ant,
+            self.last_step_min_distances_ant_to_bug,
+            self.last_step_coordination,
             self.torques,
             self.extras['ranks'],
             self.termination_height,
@@ -392,6 +414,9 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             self.win_reward_scale,
             self.stay_in_center_reward_scale,
             self.action_cost_scale,
+            self.flipped_scale,
+            self.tend_to_flip_scale,
+            self.move_scale,
             self.push_scale,
             self.joints_at_limit_cost_scale,
             self.dense_reward_scale,
@@ -399,6 +424,70 @@ class MA_Ant_Bug_Battle(VA_VecTask):
             self.num_agents1,
             self.num_agents2
         )
+        self.ant_wins += ant_wins
+        self.bug_wins += bug_wins
+        self.num_matches += num_matches
+        # if ant_wins or bug_wins:
+        #     print(f"总场次: {self.num_matches}  ant胜场: {self.ant_wins}  ant胜率: {self.ant_wins/self.num_matches:.2f}  bug胜率: {self.bug_wins/self.num_matches:.2f}")
+        #     ant_win_rate = self.ant_wins / self.num_matches
+        #     bug_win_rate = self.bug_wins / self.num_matches
+        #     self.win_rate_data.append([self.num_matches, ant_win_rate, bug_win_rate])
+            
+        #     if self.num_matches > 3000 and self.num_matches < 3010:
+        #         self.plot_win_rates()
+        # self.sum+=bug
+        # print(self.sum)
+
+    def plot_win_rates(self):
+        """绘制胜率图"""
+        if len(self.win_rate_data) < 2:
+            return
+            
+        # 将数据转换为numpy数组
+        data = np.array(self.win_rate_data)
+        total_matches = data[:, 0]
+        ant_win_rates = data[:, 1]
+        bug_win_rates = data[:, 2]
+        
+        # 创建图形
+        plt.figure(figsize=(12, 8))
+        
+        # 绘制两条线
+        plt.plot(total_matches, ant_win_rates, 'b-', linewidth=2, label='Ant win_rate', alpha=0.8)
+        plt.plot(total_matches, bug_win_rates, 'r-', linewidth=2, label='Bug win_rate', alpha=0.8)
+        
+        # 添加网格
+        plt.grid(True, alpha=0.3)
+        
+        # 设置标签和标题
+        plt.xlabel('num_matches', fontsize=12)
+        plt.ylabel('win_rate', fontsize=12)
+        plt.title('MA Ant Bug Battle win_rate line chart', fontsize=14, fontweight='bold')
+        
+        # 设置图例
+        plt.legend(fontsize=11)
+        
+        # 设置坐标轴范围
+        plt.xlim(0, total_matches[-1])
+        plt.ylim(0, 1.0)
+        
+        # 添加当前胜率信息
+        current_ant_rate = ant_win_rates[-1]
+        current_bug_rate = bug_win_rates[-1]
+        plt.text(0.02, 0.98, f'Ant_win_rate: {current_ant_rate:.3f}', 
+                transform=plt.gca().transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
+        plt.text(0.02, 0.92, f'Bug_win_rate: {current_bug_rate:.3f}', 
+                transform=plt.gca().transAxes, fontsize=10, 
+                verticalalignment='top', bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.8))
+        
+        # 保存图片
+        plt.tight_layout()
+        plt.savefig('win_rate_plot.png', dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"胜率图已保存为 win_rate_plot.png")
+
 
     def compute_observations(self):
         self.gym.refresh_dof_state_tensor(self.sim)
@@ -440,10 +529,12 @@ class MA_Ant_Bug_Battle(VA_VecTask):
                     self.num_agents2,
                     agent_idx,
                 )
+        # breakpoint()
 
     def reset_idx(self, env_ids):
         # print('reset.....', env_ids)
         # Randomization can happen only at reset time, since it can reset actor positions on GPU
+        self.sum = 0.
         if self.randomize:
             self.apply_randomizations(self.randomization_params)
 
@@ -466,8 +557,8 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         env_ids_int32 = self.actor_indices[agent_env_ids]
         rand_angle = torch.rand((len(env_ids),), device=self.device) * torch.pi * 2  # generate angle in 0-360
 
-        rand_pos = (self.borderline_space * torch.ones((len(agent_env_ids), 2), device=self.device) -
-                    torch.rand((len(agent_env_ids), 2), device=self.device))
+        rand_pos = ((self.borderline_space - 1.) * torch.ones((len(agent_env_ids), 2), device=self.device) -
+                    torch.rand((len(agent_env_ids), 2), device=self.device)) # 初始位置平均分布在半径=初始圆圈-1的位置，避免不小心开局贴着边界直接出局了
 
         unit_angle = 2 * torch.pi / self.num_agents
         for agent_idx in range(self.num_agents):
@@ -529,7 +620,26 @@ class MA_Ant_Bug_Battle(VA_VecTask):
         env_ids = (resets == 1).nonzero(as_tuple=False).flatten()
         if len(env_ids) > 0:
             self.reset_idx(env_ids)
-    
+
+        # 记录上一个step的ant 和 bug 的y坐标
+        obs1 = self.obs_buf1.view(self.num_agents1, -1, self.obs_buf1.shape[1])
+        obs2 = self.obs_buf2.view(self.num_agents2, -1, self.obs_buf2.shape[1])
+        cat_result = torch.cat((obs1[:, :, 0:2], obs2[:, :, 0:2]), dim=0)
+        self.last_step_coordination = cat_result
+        self.last_step_pos = torch.sum(torch.square(cat_result), dim=-1)
+        
+
+        # 记录上一个step离对手的距离
+        ant_positions = obs1[:, :, 0:2].unsqueeze(2).expand(-1, -1, self.num_agents2, -1)
+        # 将bug的位置扩展为 [num_agents1, num_envs, num_agents2, 2]
+        bug_positions = obs2[:, :, 0:2].unsqueeze(0).expand(self.num_agents1, -1, -1, -1)
+        bug_positions = bug_positions.permute(0, 2, 1, 3)  
+        # 计算所有ant和bug之间的欧氏距离
+        distances = torch.sqrt(torch.sum(torch.square(ant_positions - bug_positions), dim=-1))
+        # distances的形状为 [num_agents1, num_envs, num_agents2]
+        # 对每个bug，找到最近的ant的距离
+        self.last_step_min_distances_bug_to_ant = torch.min(distances, dim=0)[0]                 # [num_envs, num_agents2]
+        self.last_step_min_distances_ant_to_bug = torch.min(distances, dim=2)[0].transpose(0, 1) # [num_envs, num_agents1]
         self.compute_observations()
         self.compute_reward(self.actions1, self.actions2)
 
@@ -592,6 +702,10 @@ def compute_agent_reward(
         obs_buf2,
         reset_buf,
         progress_buf,
+        last_step_pos,
+        last_step_min_distances_bug_to_ant,
+        last_step_min_distances_ant_to_bug,
+        last_step_coordination,
         torques,
         now_rank,
         termination_height,
@@ -601,6 +715,9 @@ def compute_agent_reward(
         win_reward_scale,
         stay_in_center_reward_scale,
         action_cost_scale,
+        flipped_scale,
+        tend_to_flip_scale,
+        move_scale,
         push_scale,
         joints_at_limit_cost_scale,
         dense_reward_scale,
@@ -608,23 +725,126 @@ def compute_agent_reward(
         num_agents1,
         num_agents2
 ):
-    # type: (Tensor, Tensor, Tensor, Tensor,Tensor,Tensor,float,float,float,float,float,float,float,float,float,float,float,int,int) -> Tuple[Tensor, Tensor,Tensor,Tensor,Tensor,Tensor, Tensor]
-    # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
+    # type: (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, float, int, float, float, float, float, float, float, float, float, float, float, float, float, int, int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, int, int, int]
+    # print("input list:", obs_buf1.shape, obs_buf2.shape, reset_buf.shape, progress_buf.shape, last_step_pos.shape, last_step_min_distances_bug_to_ant.shape, last_step_min_distances_ant_to_bug.shape, last_step_coordination.shape, torques.shape, now_rank.shape, termination_height, max_episode_length, borderline_space, borderline_space_unit, win_reward_scale, stay_in_center_reward_scale, action_cost_scale, flipped_scale, tend_to_flip_scale, move_scale, push_scale, joints_at_limit_cost_scale, dense_reward_scale, dt, num_agents1, num_agents2)
     obs1 = obs_buf1.view(num_agents1, -1, obs_buf1.shape[1])
     obs2 = obs_buf2.view(num_agents2, -1, obs_buf2.shape[1])
     nxt_rank_val = num_agents1 + num_agents2 - torch.count_nonzero(now_rank, dim=-1).view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
     is_out = torch.sum(torch.square(torch.cat((obs1[:, :, 0:2], obs2[:, :, 0:2]), dim=0)), dim=-1) >= \
              (borderline_space - progress_buf * borderline_space_unit).square()
+
+    # 首先将ant的位置扩展为 [num_agents1, num_envs, num_agents2, 2] 
+    ant_positions = obs1[:, :, 0:2].unsqueeze(2).expand(-1, -1, num_agents2, -1)
+    # 将bug的位置扩展为 [num_agents1, num_envs, num_agents2, 2]
+    bug_positions = obs2[:, :, 0:2].unsqueeze(0).expand(num_agents1, -1, -1, -1)
+    bug_positions = bug_positions.permute(0, 2, 1, 3)  
+    # 计算所有ant和bug之间的欧氏距离
+    distances = torch.sqrt(torch.sum(torch.square(ant_positions - bug_positions), dim=-1))
+    # distances的形状为 [num_agents1, num_envs, num_agents2]
+    # 对每个bug，找到最近的ant的距离
+    min_distances_bug_to_ant = torch.min(distances, dim=0)[0]                 # [num_envs, num_agents2]
+    min_distances_ant_to_bug = torch.min(distances, dim=2)[0].transpose(0, 1) # [num_envs, num_agents1]
+    ant_move_to_op = min_distances_ant_to_bug - last_step_min_distances_ant_to_bug
+    bug_move_to_op = min_distances_bug_to_ant - last_step_min_distances_bug_to_ant
+    # print("===============ant_move_to_op============")
+    # print(obs1.shape)
+    # print(ant_positions.shape)
+    # print(bug_positions.shape)
+    # print((ant_positions - bug_positions).shape)
+    # print(torch.square(ant_positions - bug_positions).shape)
+    # print(min_distances_ant_to_bug.shape)
+    # print(last_step_min_distances_ant_to_bug.shape)
+    # print(min_distances_bug_to_ant)
+    # print("=========distances=======")
+    # print(min_distances_ant_to_bug)
+
+    # 课程一：圆心方向位移
+    cat_result_now = torch.cat((obs1[:, :, 0:2], obs2[:, :, 0:2]), dim=0)
+    pos_now = torch.sum(torch.square(cat_result_now), dim=-1)
+    move = pos_now - last_step_pos
+    ant_move = move[:num_agents1] # 负值越大越好，说明往圆心移动
+    bug_move = move[num_agents1:] # 反之
+
+    # 课程二：向对手方向位移
+    # 先假设只有1个bug简化计算
+    ant_is_out = is_out[:num_agents1]
+    alive_mask = ~ant_is_out # [num_agents1, num_envs]
+    first_alive_indices = torch.argmax(alive_mask.float(), dim=0)  # [num_envs]
+    alive_ant_pos = torch.gather(obs1[:, :, 0:2], 0, first_alive_indices.unsqueeze(0).unsqueeze(-1).expand(1, -1, 2))  # [1, num_envs, 2] 取出每个环境中存活的第一个ant
+
+    bug_positions = obs2[:, :, 0:2]  # shape: [num_agents2, num_envs, 2]
+    bug_is_out = is_out[num_agents1:]  # shape: [num_agents2, num_envs]
+    alive_mask_bug = ~bug_is_out  # shape: [num_agents2, num_envs]
+    first_alive_indices_bug = torch.argmax(alive_mask_bug.float(), dim=0)  # shape: [num_envs]
+    alive_bug_pos = torch.gather(bug_positions, 0, first_alive_indices_bug.unsqueeze(0).unsqueeze(-1).expand(1, -1, 2))  # shape: [1, num_envs, 2]
+    
+
+    ant_move_vec = obs1[:, :, 0:2] - last_step_coordination[:num_agents1, :, :]
+    ant_target_expanded = alive_bug_pos.expand(num_agents1, -1, -1) # 把1个bug扩充成ant数量，如果是m个bug这里可能还要调整一下
+    ant_direction = ant_target_expanded - last_step_coordination[:num_agents1, :, :]
+    ant_rush_to_op = torch.sum(ant_move_vec * ant_direction, dim=-1)
+    ant_rush_to_op_reward = torch.maximum(ant_rush_to_op, torch.zeros_like(ant_rush_to_op)) * 0. # 目前位移奖励系数是10,在课程一：向圆心位移时改为0
+    
+
+    bug_move_vec = obs2[:, :, 0:2] - last_step_coordination[num_agents1:, :, :]
+    bug_target_expanded = alive_ant_pos.expand(num_agents2, -1, -1) # 目标是第0个ant,可能的问题是第0个ant出局之后会往圈外跑，改成存活的ant里的第1个
+    bug_direction = bug_target_expanded - last_step_coordination[num_agents1:, :, :]
+    bug_rush_to_op = torch.sum(bug_move_vec * bug_direction, dim=-1)
+    bug_rush_to_op_reward = torch.maximum(bug_rush_to_op, torch.zeros_like(bug_rush_to_op)) * 0. # 目前位移奖励系数是10，在课程一：向圆心位移时改为0
+
+    # 翻转角过大惩罚
+    ant_root_orientations = obs1[:, :, 3:7]
+    ant_w, ant_x, ant_y, ant_z = ant_root_orientations[:, :, 0], ant_root_orientations[:, :, 1], ant_root_orientations[:, :, 2], ant_root_orientations[:, :, 3] # 四元数
+    ant_yaw = torch.atan2(2 * (ant_w * ant_z + ant_x * ant_y), 1 - 2 * (torch.square(ant_y) + torch.square(ant_z))) # 欧拉角绕z轴旋转的角度
+    ant_is_flipped = torch.abs(ant_yaw) < torch.pi / 6.0 # 以前pi / 4有点苛刻
+    ant_angle_to_flip = torch.abs(ant_yaw) - (torch.pi / 6.0) 
+
+    bug_root_orientations = obs2[:, :, 3:7]
+    bug_w, bug_x, bug_y, bug_z = bug_root_orientations[:, :, 0], bug_root_orientations[:, :, 1], bug_root_orientations[:, :, 2], bug_root_orientations[:, :, 3] # 四元数
+    bug_yaw = torch.atan2(2 * (bug_w * bug_z + bug_x * bug_y), 1 - 2 * (torch.square(bug_y) + torch.square(bug_z))) # 欧拉角绕z轴旋转的角度
+    bug_is_flipped = torch.abs(bug_yaw) < torch.pi / 6.0
+    bug_angle_to_flip = torch.abs(bug_yaw) - (torch.pi / 6.0) 
+
     nxt_rank = torch.where((torch.transpose(is_out, 0, 1) > 0) & (now_rank == 0), nxt_rank_val, now_rank)
     # reset agents
     tmp_ones = torch.ones_like(reset_buf)
     reset = torch.where(torch.min(is_out[:num_agents1], dim=0).values, tmp_ones, reset_buf)
     reset = torch.where(progress_buf >= max_episode_length - 1, tmp_ones, reset)
     reset = torch.where(torch.min(is_out[num_agents1:], dim=0).values, tmp_ones, reset)
+    # reset = torch.where(torch.max(ant_is_flipped, dim=0).values, tmp_ones, reset) # 一个ant翻倒则reset
+    # reset = torch.where(torch.max(bug_is_flipped, dim=0).values, tmp_ones, reset) # 一个bug翻倒则reset
     tmp_reset = reset.view(-1, 1).repeat_interleave(num_agents1 + num_agents2, dim=-1)
-    nxt_rank = torch.where((tmp_reset == 1) & (nxt_rank == 0),
-                           nxt_rank_val - 1,
-                           nxt_rank)
+    # nxt_rank = torch.where((tmp_reset == 1) & (nxt_rank == 0),
+    #                        nxt_rank_val - 1,
+    #                        nxt_rank)
+    nxt_rank = torch.where((tmp_reset == 1) & (nxt_rank == 0), # reset的时候存活的都获得第一名，否则bug先出局，剩下的存活的ant都是的倒数第二名是负分
+                        torch.ones_like(nxt_rank_val),
+                        nxt_rank)
+    # reset_mask = (tmp_reset == 1) # (num_envs, num_agents)
+    # alive_mask = (nxt_rank == 0) # (num_envs, num_agents)
+    # # 找出在需要重置的 envs 中仍然存活的智能体
+    # re_rank_mask = reset_mask & alive_mask # (num_envs, num_agents)
+    # # 获取这些存活智能体的到圆心的距离
+    # distances_to_center = torch.linalg.norm(torch.cat((obs1[:, :, :2], obs2[:, :, :2]), dim=0), dim=-1).transpose(0,1) # (num_envs, num_agents)
+    # # 对于每个环境，只考虑需要重新排名的智能体
+    # # 将不参与排名的智能体的距离设置为一个非常大的值，这样它们不会影响排序
+    # masked_distances = torch.where(re_rank_mask, distances_to_center, torch.full_like(distances_to_center, float('inf')))
+    # # 对每个环境（即每个行）进行排序，从小到大，距离越小排名越靠前
+    # # `argsort` 返回排序后的索引
+    # sorted_indices = torch.argsort(masked_distances, dim=-1)
+    # # 创建一个与 now_rank 相同形状的张量来存放新的排名
+    # new_ranks_for_reset = torch.zeros_like(now_rank)
+    # # for i in range(now_rank.shape[0]): # 遍历每个环境
+    # #     current_env_re_rank_indices = sorted_indices[i, :]
+    #     current_rank = 1
+    #     for j in range(current_env_re_rank_indices.shape[0]):
+    #         agent_idx = current_env_re_rank_indices[j]
+    #         if re_rank_mask[i, agent_idx]:
+    #             new_ranks_for_reset[i, agent_idx] = current_rank
+    #             current_rank += 1
+    # nxt_rank = torch.where(re_rank_mask, new_ranks_for_reset, nxt_rank)
+    # nxt_rank = torch.where(reset_mask, nxt_rank, now_rank)
+
     # compute metric logic
     tmp_reset = reset.view(1, -1).repeat_interleave(num_agents1 + num_agents2, dim=0)
     tmp_zeros = torch.zeros_like(is_out, dtype=torch.bool)
@@ -641,32 +861,88 @@ def compute_agent_reward(
     # print(reset)
     # print("===e=====")
 
+    # 排名奖励
     sparse_reward = 1.0 * reset.unsqueeze(-1)
-    reward_per_rank = win_reward_scale / (num_agents1 + num_agents2)
-    sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
+    # reward_per_rank = win_reward_scale / (num_agents1 + num_agents2)
+    # sparse_reward = sparse_reward * (win_reward_scale - (nxt_rank - 1) * reward_per_rank)
+    reward_per_rank = win_reward_scale / (num_agents1 + num_agents2 - 1)  # 第一名500,最后一名-500,其他人分数均匀分布在这个区间,[500 - 0 * (1000/(n-1)) , 500 - (n-1) * (1000/(n-1))]
+    sparse_reward = sparse_reward * (win_reward_scale/2 - (nxt_rank - 1) * reward_per_rank)
+    ant_rank_reward = sparse_reward[:, :num_agents1]
+    bug_rank_reward = sparse_reward[:, num_agents1:]
+    
     ant_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1))
     bug_stay_in_center_reward = stay_in_center_reward_scale * torch.exp(-torch.linalg.norm(obs2[:, :, :2], dim=-1))
     
-    print("===s=====")
-    print(f"shape: {torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)).shape}")
-    print(torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)))
-    print(f"shape: {torch.linalg.norm(obs1[:, :, :2], dim=-1).shape}")
-    print(torch.linalg.norm(obs1[:, :, :2], dim=-1))
-    print(f"shape: {obs1[:, :, :2].shape}")
-    print(obs1[:, :, :2])
-    print("===e=====")
+    # print("===s=====")
+    # print(f"shape: {torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)).shape}")
+    # print(torch.exp(-torch.linalg.norm(obs1[:, :, :2], dim=-1)))
+    # print(f"shape: {torch.linalg.norm(obs1[:, :, :2], dim=-1).shape}")
+    # print(torch.linalg.norm(obs1[:, :, :2], dim=-1))
+    # print(f"shape: {obs1[:, :, :2].shape}")
+    # print(obs1[:, :, :2])
+    # print("===e=====")
 
+    ant_flipped_penalty = flipped_scale * ant_is_flipped # ant翻倒惩罚，尽量不要用翻倒的方式向goal移动
+    bug_flipped_penalty = flipped_scale * bug_is_flipped
+    ant_tend_to_flip_penalty = tend_to_flip_scale * torch.exp(-ant_angle_to_flip)
+    bug_tend_to_flip_penalty = tend_to_flip_scale * torch.exp(-bug_angle_to_flip)
+
+    # 向圆心移动奖励暂时取消
+    ant_move_reward = -move_scale * ant_move
+    # bug_push_ant_reward = -1. * torch.sum(ant_move_reward / num_agents1).unsqueeze(0).repeat(num_agents2, 1) # ant远离圆心位移越大奖励越大
+    bug_move_reward = -move_scale * bug_move
+    # ant_push_bug_reward = -1. * torch.sum(bug_move_reward / num_agents2).unsqueeze(0).repeat(num_agents1, 1)
+
+    ant_move_to_op_reward = -move_scale * ant_move_to_op
+    bug_move_to_op_reward = -move_scale * bug_move_to_op
+    # print("===============reward start============")
+    # print(ant_move_to_op_reward.shape)
+    # print("=========distances=======")
+    # print(bug_move_to_op_reward.shape)
+
+    
+    # print("===============reward start============")
+    # print(ant_move)
+    # print("================")
+    # print(ant_move_reward)
+    # print("================")
+    # print(bug_move)
+    # print("================")
+    # print(ant_push_bug_reward)
+    # print("===============reward end============")
+    
     ant_dof_at_limit_cost = torch.sum(obs1[:, :, 13:21] > 0.99, dim=-1) * joints_at_limit_cost_scale
     bug_dof_at_limit_cost = torch.sum(obs2[:, :, 13:25] > 0.99, dim=-1) * joints_at_limit_cost_scale
     ant_action_cost_penalty = torch.sum(torch.square(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1) * action_cost_scale
     bug_action_cost_penalty = torch.sum(torch.square(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1) * action_cost_scale
     # print("torques:", torques[0, 2])
-    ant_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1))
-    bug_not_move_penalty = torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1))
+    ant_not_move_penalty = -0. * torch.exp(-torch.sum(torch.abs(torques[:, :num_agents1 * 8]).view(-1, num_agents1, 8), dim=-1))
+    bug_not_move_penalty = -0. * torch.exp(-torch.sum(torch.abs(torques[:, num_agents1 * 8:]).view(-1, num_agents2, 12), dim=-1))
     # print("shape used in the below two lines:", ant_dof_at_limit_cost.shape, ant_action_cost_penalty.shape, ant_not_move_penalty.shape, ant_stay_in_center_reward.shape)
     # print(f'action:...{action_cost_penalty.shape}')
-    ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1)
-    bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1)
+    ant_dense_reward = ant_dof_at_limit_cost.transpose(0,1) + ant_action_cost_penalty + ant_not_move_penalty + ant_stay_in_center_reward.transpose(0, 1) + ant_flipped_penalty.transpose(0, 1) + ant_tend_to_flip_penalty.transpose(0, 1) + ant_move_reward.transpose(0, 1) + ant_rush_to_op_reward.transpose(0, 1)
+    bug_dense_reward = bug_dof_at_limit_cost.transpose(0,1) + bug_action_cost_penalty + bug_not_move_penalty + bug_stay_in_center_reward.transpose(0, 1) + bug_flipped_penalty.transpose(0, 1) + bug_tend_to_flip_penalty.transpose(0, 1) + bug_move_reward.transpose(0, 1) + bug_rush_to_op_reward.transpose(0, 1)
+   
+    # 取消ant bug rank reward,取消ant bug move to op reward
+    # print("=========distances=======")
+    # if (tmp_reset == 1).all():
+    # if((ant_not_move_penalty < -0.7).any()):
+    # print("===============reward start============")
+    # print(ant_dense_reward)
+    # print("================")
+    # print(ant_dof_at_limit_cost.transpose(0,1))
+    # print("================")
+    # print(ant_action_cost_penalty)
+    # print("================")
+    # print(bug_not_move_penalty)
+    # print("========下面是stay in center========")
+    # print(ant_stay_in_center_reward.transpose(0, 1))
+    # print("================")
+    # print(ant_move_reward.transpose(0, 1))
+    # print("================")
+    # print(ant_rush_to_op_reward.transpose(0, 1))
+    # print("===============reward end============")
+
     # ant_dense_reward = ant_stay_in_center_reward.transpose(0, 1)
     # bug_dense_reward = bug_stay_in_center_reward.transpose(0, 1)
     # print(f"ant_dof_at_limit_cost:{ant_dof_at_limit_cost.transpose(0,1)}")
@@ -682,7 +958,23 @@ def compute_agent_reward(
     # print(f"out_info:{is_out}")
     # print('total_reward.shape:', total_reward.shape)
 
-    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out
+
+    # 测试胜率的时候再用这段代码，循环比较占时间,不是张量计算
+    ant_wins = 0
+    bug_wins = 0
+    matches = 0
+    # 对每个环境统计
+    # for env in range(is_out.shape[1]):
+    #     ant_out = is_out[:num_agents1, env].all().item()
+    #     bug_out = is_out[num_agents1:, env].all().item()
+    #     if ant_out and not bug_out:
+    #         bug_wins += 1
+    #         matches += 1
+    #     elif bug_out and not ant_out:
+    #         ant_wins += 1
+    #         matches += 1
+
+    return total_reward, reset, nxt_rank, wins.flatten(), loses.flatten(), draws.flatten(), is_out, bug_dense_reward, matches, ant_wins, bug_wins
 
 
 @torch.jit.script

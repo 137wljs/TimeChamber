@@ -32,6 +32,7 @@ from .ma_ant_battle import MA_Ant_Battle
 from .ma_bug_battle import MA_Bug_Battle
 from .ma_ant_bug_battle import MA_Ant_Bug_Battle
 from .ma_ant_bug_run_to_goal import MA_Ant_Bug_Run_To_Goal
+from .ma_ant_bug_shall_not_pass import MA_Ant_Bug_Shall_Not_Pass
 from .ma_humanoid_strike import HumanoidStrike
 
 # Mappings from strings to environments
@@ -41,5 +42,6 @@ isaacgym_task_map = {
     "MA_Bug_Battle": MA_Bug_Battle,
     "MA_Ant_Bug_Battle": MA_Ant_Bug_Battle,
     "MA_Humanoid_Strike": HumanoidStrike,
-    "MA_Ant_Bug_Run_To_Goal": MA_Ant_Bug_Run_To_Goal
+    "MA_Ant_Bug_Run_To_Goal": MA_Ant_Bug_Run_To_Goal,
+    "MA_Ant_Bug_Shall_Not_Pass": MA_Ant_Bug_Shall_Not_Pass
 }

@@ -14,8 +14,9 @@ env:
   envSpacing: 6
   borderlineSpace: 3 # 在sumo场景表示边界(圆)的半径，而不是边界和ant的最小距离，从_add_circle_borderline函数可知含义
   stretch_factor: 3 # 表示两条终点线拉伸程度的系数
-  paralleline_space: 6.0 # 表示原点到平行线边界的距离
+  paralleline_space: 3.0 # 表示原点到平行线边界的距离
   episodeLength: 1000
+  # episodeLength: 150 # 训练前记得改成1000,150只是方便看reset效果
   enableDebugVis: False
   controlFrequencyInv: 1
   clipActions: 1.0
@@ -35,11 +36,14 @@ env:
   # cost parameters
   terminationHeight: 0.31
   dofVelocityScale: 0.2
-  jointsAtLimitCost: -0.1
+  # jointsAtLimitCost: -0.1
+  jointsAtLimitCost: 0 # 取消一下关节活动度过大的惩罚
 
   plane:
     staticFriction: 1.0
     dynamicFriction: 1.0
+    # dynamicFriction: 3.0 # 可能对bug更有利？3.0好像太大了，动不起来
+    # dynamicFriction: 1.5  # 1.5训出来也不动
     restitution: 0.0
 
   asset:

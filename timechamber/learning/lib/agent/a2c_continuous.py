@@ -52,6 +52,7 @@ class ContinuousA2CBase(A2CBase):
         self.actions_high2 = torch.from_numpy(action_space[1].high.copy()).float().to(self.ppo_device)
 
         from timechamber.learning.lib.model.a2c_continuous_logstd_model import ModelA2CContinuousLogStd
+        from timechamber.learning.lib.mat.algorithms.mat.algorithm.ma_transformer import MultiAgentTransformer
         keys1 = {
             'actions_num' : self.actions_num1,
             'input_shape' : self.obs_shape1,
@@ -60,7 +61,7 @@ class ContinuousA2CBase(A2CBase):
             'normalize_value' : self.normalize_value,
             'normalize_input': self.normalize_input,
         }
-        self.model1 = ModelA2CContinuousLogStd(params, keys1)
+        # self.model1 = ModelA2CContinuousLogStd(params, keys1)
         keys2 = {
             'actions_num' : self.actions_num2,
             'input_shape' : self.obs_shape2,
@@ -69,7 +70,10 @@ class ContinuousA2CBase(A2CBase):
             'normalize_value' : self.normalize_value,
             'normalize_input': self.normalize_input,
         }
-        self.model2 = ModelA2CContinuousLogStd(params, keys2)
+        # self.model2 = ModelA2CContinuousLogStd(params, keys2)
+        # 使用mat替换原mlp
+        self.model1 = MultiAgentTransformer(self.obs_shape1[0], self.obs_shape1[0], self.actions_num1, self.num_agents1, 1, 64, 1, self.obs_shape1, False, torch.device("cuda:0"), 'Continuous', False, False, True, True) # 第一个参数state_dim无所谓，后续mat没用到
+        self.model2 = MultiAgentTransformer(self.obs_shape2[0], self.obs_shape2[0], self.actions_num2, self.num_agents2, 1, 64, 1, self.obs_shape2, False, torch.device("cuda:0"), 'Continuous', False, False, True, True)
         print("obs_shape1", self.obs_shape1)
         print("obs_shape2", self.obs_shape2)
 
@@ -204,6 +208,8 @@ class ContinuousA2CBase(A2CBase):
         play_time = play_time_end - play_time_start
         update_time = update_time_end - update_time_start
         total_time = update_time_end - play_time_start
+
+        # breakpoint()
 
         return batch_dict1['step_time'], play_time, update_time, total_time, a_losses1, c_losses1, b_losses1, entropies1, kls1, last_lr1, lr_mul1, a_losses2, c_losses2, b_losses2, entropies2, kls2, last_lr2, lr_mul2 # step_time in two batch_dict is the same
 
@@ -392,7 +398,9 @@ class ContinuousA2CBase(A2CBase):
                     self.writer2.add_scalar('episode_lengths/step', mean_lengths, frame2)
                     self.writer2.add_scalar('episode_lengths/iter', mean_lengths, epoch_num)
                     self.writer2.add_scalar('episode_lengths/time', mean_lengths, total_time)
+                    
 
+                    print('test rewards: ', mean_rewards1, mean_rewards2)
                     if self.has_self_play_config:
                         self.self_play_manager.update(self)
 
@@ -472,7 +480,13 @@ class ContinuousA2CBase(A2CBase):
         #         print(f"key {key}:", batch_dict1[key].shape)
         
         with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-            res_dict = self.model1(batch_dict)                  #
+            
+            # res_dict = self.model1(batch_dict)                  #
+            
+            reshaped_actions_batch = actions_batch.reshape(-1, self.num_agents1, self.actions_num1)
+            reshaped_obs = obs_batch.reshape(-1, self.num_agents1, self.obs_shape1[0]) # 将obs变成mat使用的shape
+            res_dict = self.model1(reshaped_obs, reshaped_obs, reshaped_actions_batch, None)  # 使用新模型计算相同动作在新策略下的概率
+
             action_log_probs = res_dict['prev_neglogp']
             values = res_dict['values']
             entropy = res_dict['entropy']
@@ -545,7 +559,12 @@ class ContinuousA2CBase(A2CBase):
         }
         
         with torch.cuda.amp.autocast(enabled=self.mixed_precision):
-            res_dict = self.model2(batch_dict)
+            
+            # res_dict = self.model2(batch_dict)
+            reshaped_actions_batch = actions_batch.reshape(-1, self.num_agents2, self.actions_num2)
+            reshaped_obs = obs_batch.reshape(-1, self.num_agents2, self.obs_shape2[0]) # 将obs变成mat使用的shape
+            res_dict = self.model2(reshaped_obs, reshaped_obs, reshaped_actions_batch, None) # 使用新模型计算相同动作在新策略下的概率
+
             action_log_probs = res_dict['prev_neglogp']
             values = res_dict['values']
             entropy = res_dict['entropy']
@@ -626,6 +645,7 @@ class ContinuousA2CBase(A2CBase):
 class A2CAgent(ContinuousA2CBase):
 
     def __init__(self, base_name, params):
+        # breakpoint()
         ContinuousA2CBase.__init__(self, base_name, params)        
         self.model1.to(self.ppo_device)
         self.model2.to(self.ppo_device)
@@ -652,12 +672,64 @@ class A2CAgent(ContinuousA2CBase):
         return self.epoch_num
         
     def save(self, fn):
-        state = self.get_full_state_weights()
-        torch_ext.save_checkpoint(fn, state)
+        # state = self.get_full_state_weights()
+        # torch_ext.save_checkpoint(fn, state)
+        import os
+        os.makedirs(fn, exist_ok=True)
+        # ant
+        ant_state = self.get_full_state_weights()
+        # 只保留ant相关内容
+        ant_only = {k: v for k, v in ant_state.items() if not k.startswith('model2') and not k.startswith('optimizer2') and not k.startswith('last_mean_rewards2')}
+        ant_only['model1'] = ant_state['model1']
+        ant_only['optimizer1'] = ant_state['optimizer1']
+        ant_only['last_mean_rewards1'] = ant_state['last_mean_rewards1']
+        ant_only['epoch'] = ant_state['epoch']
+        ant_only['frame1'] = ant_state['frame1']
+        ant_only['frame'] = ant_state['frame']
+        if 'env_state' in ant_state:
+            ant_only['env_state'] = ant_state['env_state']
+        from timechamber.learning.lib.core import torch_ext
+        torch_ext.save_checkpoint(os.path.join(fn, 'ant'), ant_only)
+        # bug
+        bug_only = {k: v for k, v in ant_state.items() if not k.startswith('model1') and not k.startswith('optimizer1') and not k.startswith('last_mean_rewards1')}
+        bug_only['model2'] = ant_state['model2']
+        bug_only['optimizer2'] = ant_state['optimizer2']
+        bug_only['last_mean_rewards2'] = ant_state['last_mean_rewards2']
+        bug_only['epoch'] = ant_state['epoch']
+        bug_only['frame2'] = ant_state['frame2']
+        bug_only['frame'] = ant_state['frame']
+        if 'env_state' in ant_state:
+            bug_only['env_state'] = ant_state['env_state']
+        torch_ext.save_checkpoint(os.path.join(fn, 'bug'), bug_only)
 
     def restore(self, fn, set_epoch=True):                                             # TODO
-        checkpoint = torch_ext.load_checkpoint(fn)
-        self.set_full_state_weights(checkpoint, set_epoch=set_epoch)
+        # checkpoint = torch_ext.load_checkpoint(fn)
+        # self.set_full_state_weights(checkpoint, set_epoch=set_epoch)
+        """
+        分别从指定文件夹下的ant.pth和bug.pth加载ant和bug的参数。
+        """
+        import os
+        from timechamber.learning.lib.core import torch_ext
+        ant_ckpt = torch_ext.load_checkpoint(os.path.join(fn, 'ant.pth'))
+        bug_ckpt = torch_ext.load_checkpoint(os.path.join(fn, 'bug.pth'))
+        # 合并为一个dict，兼容set_full_state_weights
+        merged = {}
+        merged['model1'] = ant_ckpt['model1']
+        merged['optimizer1'] = ant_ckpt['optimizer1']
+        merged['last_mean_rewards1'] = ant_ckpt.get('last_mean_rewards1', -1000000000)
+        merged['frame1'] = ant_ckpt.get('frame1', 0)
+        merged['model2'] = bug_ckpt['model2']
+        merged['optimizer2'] = bug_ckpt['optimizer2']
+        merged['last_mean_rewards2'] = bug_ckpt.get('last_mean_rewards2', -1000000000)
+        merged['frame2'] = bug_ckpt.get('frame2', 0)
+        # epoch/frame/env_state 取ant的
+        merged['epoch'] = ant_ckpt.get('epoch', 0)
+        merged['frame'] = ant_ckpt.get('frame', 0)
+        if 'env_state' in ant_ckpt:
+            merged['env_state'] = ant_ckpt['env_state']
+        elif 'env_state' in bug_ckpt:
+            merged['env_state'] = bug_ckpt['env_state']
+        self.set_full_state_weights(merged, set_epoch=set_epoch)
 
     def set_full_state_weights(self, checkpoint, set_epoch=True):
         weights = checkpoint

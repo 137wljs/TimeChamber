@@ -138,7 +138,7 @@ class A2CBase(BaseAlgorithm):
         self.env_config = config.get('env_config', {})
         self.num_actors = config['num_actors']                      # ?
         self.env_name = config['env_name']
-
+     
         # self.env_info is environment config class cfg.env
         self.vec_env = vecenv.create_vec_env(self.env_name, self.num_actors, **self.env_config)
         self.env_info = self.vec_env.get_env_info()
@@ -451,9 +451,12 @@ class A2CBase(BaseAlgorithm):
         }
 
         with torch.no_grad():
-            res_dict = self.model1(input_dict)
-
-        return res_dict
+            # res_dict = self.model1(input_dict)
+            
+            reshaped_obs = processed_obs.reshape(self.num_actors, self.num_agents1, self.obs_shape1[0]) # 将obs变成mat使用的shape
+            new_res_dict = self.model1.get_actions(reshaped_obs, reshaped_obs, None, False) # self.new_model1().get_actions()这种写法是错的，会执行new_model1的forward函数，应该直接作为属性访问而不是函数调用(省去model1后面的括号)
+        # return res_dict
+        return new_res_dict
     
     def get_action_values2(self, obs):
         processed_obs = self._preproc_obs(obs['obs2'])
@@ -463,10 +466,14 @@ class A2CBase(BaseAlgorithm):
             'prev_actions': None, 
             'obs' : processed_obs
         }
-
         with torch.no_grad():
-            res_dict = self.model2(input_dict)
-        return res_dict
+            # res_dict = self.model2(input_dict)
+            
+            reshaped_obs = processed_obs.reshape(self.num_actors, self.num_agents2, self.obs_shape2[0]) # 将obs变成mat使用的shape
+            new_res_dict = self.model2.get_actions(reshaped_obs, reshaped_obs, None, False)
+
+        # return res_dict
+        return new_res_dict
 
     def get_values1(self, obs):
         with torch.no_grad():
@@ -477,9 +484,17 @@ class A2CBase(BaseAlgorithm):
                 'prev_actions': None, 
                 'obs' : processed_obs,
             }
-            result = self.model1(input_dict)
-            value = result['values']
-            return value
+            # result = self.model1(input_dict)
+
+            # 使用新模型
+            reshaped_obs = processed_obs.reshape(self.num_actors, self.num_agents1, self.obs_shape1[0]) # 将obs变成mat使用的shape
+            new_res_dict = self.model1.get_actions(reshaped_obs, reshaped_obs, None, False) # self.new_model1().get_actions()这种写法是错的，会执行new_model1的forward函数，应该直接作为属性访问而不是函数调用(省去model1后面的括号)
+       
+            # value = result['values']
+            new_value = new_res_dict['values']
+
+            # return value
+            return new_value
         
     def get_values2(self, obs):
         with torch.no_grad():
@@ -490,9 +505,17 @@ class A2CBase(BaseAlgorithm):
                 'prev_actions': None, 
                 'obs' : processed_obs,
             }
-            result = self.model2(input_dict)
-            value = result['values']
-            return value
+            # result = self.model2(input_dict) 
+
+            # 使用新模型
+            reshaped_obs = processed_obs.reshape(self.num_actors, self.num_agents2, self.obs_shape2[0]) # 将obs变成mat使用的shape
+            new_res_dict = self.model2.get_actions(reshaped_obs, reshaped_obs, None, False)
+            
+            # value = result['values']
+            new_value = new_res_dict['values']
+
+            # return value
+            return new_value
 
     @property
     def device(self):
@@ -841,7 +864,7 @@ class A2CBase(BaseAlgorithm):
                 masks = self.vec_env.get_action_masks()
                 res_dict1 = self.get_masked_action_values1(self.obs, masks)
             else:
-                res_dict1 = self.get_action_values1(self.obs)
+                res_dict1 = self.get_action_values1(self.obs) # 采样动作,利用网络前向传播采样得到动作
                 res_dict2 = self.get_action_values2(self.obs)
             self.experience_buffer1.update_data('obses', n, self.obs['obs1'])
             self.experience_buffer1.update_data('dones', n, self.dones.unsqueeze(1).repeat(1, self.num_agents1).view(-1))
@@ -857,7 +880,7 @@ class A2CBase(BaseAlgorithm):
             # res_dict1['actions'] = res_dict1['actions'].view(self.batch_size1 * self.num_agents1, -1)
             # res_dict2['actions'] = res_dict2['actions'].view(self.batch_size2 * self.num_agents2, -1)
             step_time_start = time.time()
-            self.obs, rewards, self.dones, infos = self.env_step(res_dict1['actions'], res_dict2['actions'])
+            self.obs, rewards, self.dones, infos = self.env_step(res_dict1['actions'], res_dict2['actions'])  # 应用动作，与环境交互，获得新观测
             step_time_end = time.time()
             if infos.get('out', None) is not None:
                 outs = infos['out']
@@ -935,5 +958,7 @@ class A2CBase(BaseAlgorithm):
         batch_dict2['returns'] = swap_and_flatten01(mb_returns2)
         batch_dict2['played_frames'] = self.batch_size2
         batch_dict2['step_time'] = step_time
+
+        # breakpoint()
 
         return batch_dict1, batch_dict2
